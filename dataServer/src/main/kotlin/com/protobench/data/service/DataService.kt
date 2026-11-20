@@ -28,6 +28,9 @@ class DataService {
         )
         const val CHUNK_SIZE = 64 * 1024
 
+        /** 시작 때 만드는 복잡도 축 데이터의 id 접미사 (데이터의 id는 "simple-fixed" 등으로 고정된다) */
+        const val COMPLEX_DATA_ID = "fixed"
+
         // Phase 5: 복잡도별 설정
         const val SIMPLE_TAGS_COUNT = 0
         const val MEDIUM_TAGS_COUNT = 10
@@ -83,6 +86,15 @@ class DataService {
     private val payloads = mutableMapOf<String, ByteArray>()
     val serverId = "data-server-${System.currentTimeMillis() % 10000}"
 
+    /**
+     * 복잡도 축의 데이터(도메인 객체) — 서버 시작 때 복잡도마다 한 번 만들어 둔다.
+     *
+     * 세 경로(`http-json`, `http-proto`, `grpc-unary`)가 요청마다 이 같은 객체에서 응답을 만든다.
+     * 요청마다 달라지는 것은 응답의 requestId와 timestamp뿐이다. 직렬화(JSON, Protobuf)는
+     * 측정 대상이라 요청마다 한다(미리 직렬화해 두지 않는다).
+     */
+    private val complexData = mutableMapOf<String, Any>()
+
     @PostConstruct
     fun init() {
         PAYLOAD_SIZES.forEach { (name, size) ->
@@ -91,9 +103,21 @@ class DataService {
             payloads[name] = payload
             println("✅ Initialized payload: $name (${size} bytes)")
         }
-        println("✅ Phase 5: Complex data generators ready")
-        println("✅ Phase 6: Ultra/Extreme data generators ready")
+        complexData["simple"] = generateSimpleData(COMPLEX_DATA_ID)
+        complexData["medium"] = generateMediumData(COMPLEX_DATA_ID)
+        complexData["complex"] = generateComplexData(COMPLEX_DATA_ID)
+        complexData["ultra"] = generateUltraData(COMPLEX_DATA_ID)
+        complexData["extreme"] = generateExtremeData(COMPLEX_DATA_ID)
+        println("✅ Complex data built once per complexity: ${complexData.keys}")
     }
+
+    /**
+     * 시작 때 만들어 둔 복잡도 축 데이터
+     *
+     * @param complexity simple, medium, complex, ultra, extreme (대소문자 무시)
+     * @return 해당 DTO(SimpleDataDto 등), 복잡도 값이 잘못되면 null
+     */
+    fun getComplexData(complexity: String): Any? = complexData[complexity.lowercase()]
 
     /**
      * 지정된 크기의 페이로드 반환

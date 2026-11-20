@@ -128,8 +128,11 @@ class DataController(
     /**
      * 복잡한 데이터를 JSON 형식으로 반환
      *
+     * 데이터는 서버 시작 때 만들어 둔 객체([DataService.getComplexData])다. Protobuf 두 경로와 같은 객체를
+     * 요청마다 Jackson으로 직렬화한다. 요청마다 달라지는 것은 requestId와 timestamp뿐이다.
+     *
      * @param requestId 요청 ID
-     * @param complexity 복잡도 (simple, medium, complex, ultra, extreme)
+     * @param complexity 복잡도 (simple, medium, complex, ultra, extreme). 잘못되면 400.
      * @return ComplexDataJsonResponse (복잡도에 따른 데이터 포함)
      */
     @GetMapping("/complex/json")
@@ -137,73 +140,18 @@ class DataController(
         @RequestParam(defaultValue = "unknown") requestId: String,
         @RequestParam(defaultValue = "simple") complexity: String
     ): ResponseEntity<*> {
-        val timestamp = System.currentTimeMillis()
-
-        return when (complexity.lowercase()) {
-            "simple" -> {
-                val data = dataService.generateSimpleData(requestId)
-                val response = ComplexDataJsonResponse(
-                    requestId = requestId,
-                    timestamp = timestamp,
-                    serializedSize = estimateJsonSize(data),
-                    complexity = "simple",
-                    data = data
-                )
-                ResponseEntity.ok(response)
-            }
-            "medium" -> {
-                val data = dataService.generateMediumData(requestId)
-                val response = ComplexDataJsonResponse(
-                    requestId = requestId,
-                    timestamp = timestamp,
-                    serializedSize = estimateJsonSize(data),
-                    complexity = "medium",
-                    data = data
-                )
-                ResponseEntity.ok(response)
-            }
-            "complex" -> {
-                val data = dataService.generateComplexData(requestId)
-                val response = ComplexDataJsonResponse(
-                    requestId = requestId,
-                    timestamp = timestamp,
-                    serializedSize = estimateJsonSize(data),
-                    complexity = "complex",
-                    data = data
-                )
-                ResponseEntity.ok(response)
-            }
-            // ============================================
-            // Phase 6: Ultra/Extreme 복잡도 처리
-            // ============================================
-            "ultra" -> {
-                val data = dataService.generateUltraData(requestId)
-                val response = ComplexDataJsonResponse(
-                    requestId = requestId,
-                    timestamp = timestamp,
-                    serializedSize = estimateJsonSize(data),
-                    complexity = "ultra",
-                    data = data
-                )
-                ResponseEntity.ok(response)
-            }
-            "extreme" -> {
-                val data = dataService.generateExtremeData(requestId)
-                val response = ComplexDataJsonResponse(
-                    requestId = requestId,
-                    timestamp = timestamp,
-                    serializedSize = estimateJsonSize(data),
-                    complexity = "extreme",
-                    data = data
-                )
-                ResponseEntity.ok(response)
-            }
-            else -> {
-                ResponseEntity.badRequest().body(
-                    mapOf("error" to "Invalid complexity. Use: simple, medium, complex, ultra, extreme")
-                )
-            }
-        }
+        val data = dataService.getComplexData(complexity)
+            ?: return ResponseEntity.badRequest().body(
+                mapOf("error" to "Invalid complexity. Use: simple, medium, complex, ultra, extreme")
+            )
+        val response = ComplexDataJsonResponse(
+            requestId = requestId,
+            timestamp = System.currentTimeMillis(),
+            serializedSize = estimateJsonSize(data),
+            complexity = complexity.lowercase(),
+            data = data
+        )
+        return ResponseEntity.ok(response)
     }
 
     /**

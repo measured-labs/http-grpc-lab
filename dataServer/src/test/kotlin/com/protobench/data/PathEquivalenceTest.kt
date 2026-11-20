@@ -29,8 +29,8 @@ import java.util.Base64
  * 같은 요청에 대해 HTTP 경로와 gRPC 경로가 같은 내용을 돌려주는지 확인한다.
  *
  * 크기 축: http-json, http-bytes, http-proto가 grpc-unary와 같은 페이로드를 보낸다.
- * 복잡도 축: HTTP + Protobuf 응답이 gRPC 응답과 같은 메시지 형태(필드, 반복 개수)를 가진다.
- * (복잡도 축의 값은 요청마다 무작위로 만들어지므로 값이 아니라 형태를 비교한다.)
+ * 복잡도 축: 데이터는 서버 시작 때 한 번 만들어 두므로, http-json · http-proto · grpc-unary가
+ * 필드 값까지 같은 데이터를 보낸다(요청마다 다른 것은 requestId와 timestamp뿐).
  */
 class PathEquivalenceTest {
 
@@ -109,11 +109,7 @@ class PathEquivalenceTest {
     @ParameterizedTest
     @ValueSource(strings = ["simple", "medium", "complex", "ultra", "extreme"])
     fun `복잡도 축 - 같은 데이터를 주면 HTTP Protobuf와 gRPC가 같은 메시지를 만든다`(complexity: String) {
-        // 생성기가 처음 만든 DTO를 다시 돌려주게 해서 두 경로가 같은 데이터를 받게 한다
-        val fixed = FixedDataService().also { it.init() }
-        val builder = ComplexDataProtoBuilder(fixed)
-        val grpcService = GrpcDataService(fixed, builder)
-        val mvc = MockMvcBuilders.standaloneSetup(DataController(fixed, builder)).build()
+        val mvc = mockMvc
 
         val requestId = "req-same-$complexity"
         val grpc = runBlocking {
@@ -130,6 +126,41 @@ class PathEquivalenceTest {
         assertEquals(grpc.toBuilder().clearTimestamp().build(), http.toBuilder().clearTimestamp().build())
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["simple", "medium", "complex", "ultra", "extreme"])
+    fun `복잡도 축 - 세 경로가 필드 값까지 같은 데이터를 보낸다`(complexity: String) {
+        val requestId = "req-three-$complexity"
+        val grpc = runBlocking {
+            grpcService.getComplexData(
+                ComplexDataRequest.newBuilder().setRequestId(requestId).setComplexity(complexity).build()
+            )
+        }
+        val proto = ComplexDataResponse.parseFrom(
+            getBytes("/data/complex/binary?requestId=$requestId&complexity=$complexity")
+        )
+        val json = kotlinMapper.readTree(getBytes("/data/complex/json?requestId=$requestId&complexity=$complexity"))
+
+        // grpc-unary와 http-proto: 같은 메시지(timestamp만 호출 시각)
+        assertEquals(grpc.toBuilder().clearTimestamp().build(), proto.toBuilder().clearTimestamp().build())
+
+        // http-json: 받은 data를 DTO로 풀어 같은 빌더로 메시지를 만들면 http-proto와 같다(모든 필드 값이 같다)
+        assertEquals(requestId, json["requestId"].asText())
+        assertEquals(complexity, json["complexity"].asText())
+        val dto = kotlinMapper.treeToValue(json["data"], dtoClasses.getValue(complexity))
+        val fromJson = ComplexDataProtoBuilder(dataService).buildFrom(requestId, proto.timestamp, dto)
+        assertEquals(proto, fromJson)
+    }
+
+    private val kotlinMapper = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+
+    private val dtoClasses: Map<String, Class<*>> = mapOf(
+        "simple" to SimpleDataDto::class.java,
+        "medium" to MediumDataDto::class.java,
+        "complex" to ComplexDataDto::class.java,
+        "ultra" to UltraDataDto::class.java,
+        "extreme" to ExtremeDataDto::class.java
+    )
+
     @Test
     fun `복잡도 축 - 잘못된 복잡도 값은 세 경로 모두 거절한다`() {
         assertEquals(400, mockMvc.get("/data/complex/binary?requestId=r&complexity=nope").andReturn().response.status)
@@ -140,18 +171,6 @@ class PathEquivalenceTest {
             }
         }
         assertEquals(Status.Code.INVALID_ARGUMENT, e.status.code)
-    }
-
-    /** 복잡도별로 처음 만든 DTO를 계속 돌려주는 DataService */
-    private class FixedDataService : DataService() {
-        private val cache = mutableMapOf<String, Any>()
-        @Suppress("UNCHECKED_CAST")
-        private fun <T : Any> once(key: String, make: () -> T): T = cache.getOrPut(key, make) as T
-        override fun generateSimpleData(requestId: String) = once("simple") { super.generateSimpleData(requestId) }
-        override fun generateMediumData(requestId: String) = once("medium") { super.generateMediumData(requestId) }
-        override fun generateComplexData(requestId: String) = once("complex") { super.generateComplexData(requestId) }
-        override fun generateUltraData(requestId: String) = once("ultra") { super.generateUltraData(requestId) }
-        override fun generateExtremeData(requestId: String) = once("extreme") { super.generateExtremeData(requestId) }
     }
 
     /** 메시지의 형태: 메시지 필드의 존재 여부와 반복 필드의 개수를 경로별로 모은다. */

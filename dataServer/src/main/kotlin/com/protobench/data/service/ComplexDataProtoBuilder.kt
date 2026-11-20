@@ -19,22 +19,31 @@ class ComplexDataProtoBuilder(
     }
 
     /**
-     * 복잡도에 맞는 데이터를 만들어 ComplexDataResponse로 빌드한다.
+     * 시작 때 만들어 둔 복잡도 축 데이터([DataService.getComplexData])를 ComplexDataResponse로 빌드한다.
+     *
+     * 데이터는 JSON 경로와 같은 객체다. 요청마다 달라지는 것은 requestId와 timestamp뿐이다.
      *
      * @param requestId 요청 ID
      * @param complexity 복잡도 (simple, medium, complex, ultra, extreme — 대소문자 무시)
      * @return ComplexDataResponse, 복잡도 값이 잘못되면 null
      */
     fun build(requestId: String, complexity: String): ComplexDataResponse? {
-        val timestamp = System.currentTimeMillis()
-        return when (complexity.lowercase()) {
-            "simple" -> buildSimpleResponse(requestId, timestamp)
-            "medium" -> buildMediumResponse(requestId, timestamp)
-            "complex" -> buildComplexResponse(requestId, timestamp)
-            "ultra" -> buildUltraResponse(requestId, timestamp)
-            "extreme" -> buildExtremeResponse(requestId, timestamp)
-            else -> null
-        }
+        val data = dataService.getComplexData(complexity) ?: return null
+        return buildFrom(requestId, System.currentTimeMillis(), data)
+    }
+
+    /**
+     * 주어진 DTO를 ComplexDataResponse로 빌드한다(DTO의 타입으로 복잡도를 고른다).
+     *
+     * @param data SimpleDataDto, MediumDataDto, ComplexDataDto, UltraDataDto, ExtremeDataDto 중 하나
+     */
+    fun buildFrom(requestId: String, timestamp: Long, data: Any): ComplexDataResponse = when (data) {
+        is SimpleDataDto -> buildSimpleResponse(requestId, timestamp, data)
+        is MediumDataDto -> buildMediumResponse(requestId, timestamp, data)
+        is ComplexDataDto -> buildComplexResponse(requestId, timestamp, data)
+        is UltraDataDto -> buildUltraResponse(requestId, timestamp, data)
+        is ExtremeDataDto -> buildExtremeResponse(requestId, timestamp, data)
+        else -> throw IllegalArgumentException("Unknown complex data type: ${data::class}")
     }
 
     /**
@@ -45,8 +54,7 @@ class ComplexDataProtoBuilder(
         return builder.setResponseSize(response.serializedSize).build()
     }
 
-    private fun buildSimpleResponse(requestId: String, timestamp: Long): ComplexDataResponse {
-        val data = dataService.generateSimpleData(requestId)
+    private fun buildSimpleResponse(requestId: String, timestamp: Long, data: SimpleDataDto): ComplexDataResponse {
 
         val simpleData = SimpleData.newBuilder()
             .setId(data.id)
@@ -64,8 +72,7 @@ class ComplexDataProtoBuilder(
         )
     }
 
-    private fun buildMediumResponse(requestId: String, timestamp: Long): ComplexDataResponse {
-        val data = dataService.generateMediumData(requestId)
+    private fun buildMediumResponse(requestId: String, timestamp: Long, data: MediumDataDto): ComplexDataResponse {
 
         val mediumData = MediumData.newBuilder()
             .setId(data.id)
@@ -91,8 +98,7 @@ class ComplexDataProtoBuilder(
         )
     }
 
-    private fun buildComplexResponse(requestId: String, timestamp: Long): ComplexDataResponse {
-        val data = dataService.generateComplexData(requestId)
+    private fun buildComplexResponse(requestId: String, timestamp: Long, data: ComplexDataDto): ComplexDataResponse {
 
         val complexData = ComplexData.newBuilder()
             .setId(data.id)
@@ -126,8 +132,7 @@ class ComplexDataProtoBuilder(
     }
 
     /** Ultra: 3단계 중첩 (~200회 빌더 호출) */
-    private fun buildUltraResponse(requestId: String, timestamp: Long): ComplexDataResponse {
-        val data = dataService.generateUltraData(requestId)
+    private fun buildUltraResponse(requestId: String, timestamp: Long, data: UltraDataDto): ComplexDataResponse {
 
         val ultraData = UltraData.newBuilder()
             // 기본 필드 15개
@@ -170,8 +175,7 @@ class ComplexDataProtoBuilder(
     }
 
     /** Extreme: 4단계 중첩 (~800회 빌더 호출) */
-    private fun buildExtremeResponse(requestId: String, timestamp: Long): ComplexDataResponse {
-        val data = dataService.generateExtremeData(requestId)
+    private fun buildExtremeResponse(requestId: String, timestamp: Long, data: ExtremeDataDto): ComplexDataResponse {
 
         val extremeData = ExtremeData.newBuilder()
             // 기본 필드 20개
