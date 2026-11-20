@@ -24,11 +24,12 @@ class BenchConfigLogger(
         val ctx = event.applicationContext
         val profiles = ctx.environment.activeProfiles.joinToString(",").ifEmpty { "default" }
         val tomcatMaxThreads = (ctx as? ServletWebServerApplicationContext)?.let { tomcatMaxThreads(it) }
+        // read: 실행 중인 객체에서 읽은 값 · set: 설정한 값, 상수, 규칙으로 계산한 값(객체에서 읽지 못함)
         println(
             "BENCH_CONFIG server=apiServer profile=$profiles " +
-                "tomcatMaxThreads=${tomcatMaxThreads ?: "unknown"} " +
+                "read: tomcatMaxThreads=${tomcatMaxThreads ?: "unknown"} " +
                 "httpPoolMaxConnections=${httpDataClient.poolMaxConnections} " +
-                "httpPoolPendingAcquireMaxCount=${httpDataClient.poolPendingAcquireMaxCount} " +
+                "| set: httpPoolPendingAcquireMaxCount=${httpDataClient.poolPendingAcquireMaxCount} " +
                 "httpPoolPendingAcquireTimeoutMs=${httpDataClient.poolPendingAcquireTimeoutMs} " +
                 "grpcChannels=${grpcDataClient.channelCount}"
         )

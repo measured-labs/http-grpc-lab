@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.annotation.PreDestroy
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
-import reactor.netty.http.HttpResources
 import reactor.netty.http.client.HttpClient
 import reactor.netty.resources.ConnectionProvider
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
@@ -61,9 +60,9 @@ class HttpDataClient(
     /**
      * 연결 풀
      *
-     * - `default`(maxConcurrency 없음): 손대지 않는다. WebClient 기본 커넥터가 쓰는 reactor-netty 전역 풀
+     * - `default`(maxConcurrency 없음): 손대지 않는다. reactor-netty 전역 풀
      *   (`HttpResources`: 최대 연결 500, 대기 상한 그 두 배, 대기 시간 45초 — reactor-netty 1.1.15).
-     * - `matched`: 최대 연결 수와 대기 상한을 모두 maxConcurrency로 둔다(대기 시간은 기본값).
+     * - `matched`: 최대 연결 수와 대기 상한을 모두 maxConcurrency로 둔다(대기 시간·유휴 시간은 기본값).
      *   reactor-netty의 최대 연결 수는 원격 주소(여기서는 dataServer 하나)마다 적용된다.
      */
     private val connectionProvider: ConnectionProvider? = maxConcurrency?.let { n ->
@@ -73,15 +72,31 @@ class HttpDataClient(
             .build()
     }
 
-    /** 실제로 쓰는 풀의 설정 (기동 로그용) */
-    val poolMaxConnections: Int = (connectionProvider ?: HttpResources.get()).maxConnections()
+    /**
+     * WebClient의 커넥터가 실제로 쓰는 HttpClient
+     *
+     * - `default`: Spring의 기본 커넥터 `ReactorClientHttpConnector()`가 만드는 것과 같다
+     *   (spring-web 6.1.3 바이트코드: `HttpClient.create()` → 전역 풀). 기본 커넥터를 쓰면 이 객체를
+     *   밖에서 읽을 수 없어서, 같은 것을 직접 만들어 넘긴다.
+     * - `matched`: [connectionProvider]를 쓴다.
+     */
+    private val httpClient: HttpClient = connectionProvider
+        ?.let { HttpClient.create(it) }
+        ?: HttpClient.create().compress(true)
+
+    /** 실제로 쓰는 풀의 최대 연결 수 — 커넥터에 넘긴 HttpClient의 ConnectionProvider에서 읽는다(기동 로그용) */
+    val poolMaxConnections: Int = httpClient.configuration().connectionProvider().maxConnections()
+
+    /** 대기 상한 — 설정한 값(`matched`) 또는 reactor-netty의 규칙(최대 연결의 2배)으로 계산한 값. 객체에서 읽지 못한다 */
     val poolPendingAcquireMaxCount: Int = maxConcurrency ?: (2 * poolMaxConnections)
+
+    /** 대기 시간 — reactor-netty 상수 */
     val poolPendingAcquireTimeoutMs: Long = ConnectionProvider.DEFAULT_POOL_ACQUIRE_TIMEOUT
 
     private val webClient = WebClient.builder()
         .baseUrl(baseUrl)
         .codecs { it.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) }
-        .apply { b -> connectionProvider?.let { b.clientConnector(ReactorClientHttpConnector(HttpClient.create(it))) } }
+        .clientConnector(ReactorClientHttpConnector(httpClient))
         .build()
 
     @PreDestroy
