@@ -126,6 +126,26 @@ class DataService {
         return PAYLOAD_SIZES[size.lowercase()] ?: PAYLOAD_SIZES["1mb"]!!
     }
 
+    /**
+     * 크기 축의 Protobuf 응답 메시지 생성
+     *
+     * gRPC 단건(grpc-unary)과 HTTP + Protobuf(http-proto) 경로가 같은 메시지를 보내도록
+     * 두 경로 모두 이 함수로 만든다.
+     *
+     * @param requestId 요청 ID
+     * @param size 페이로드 크기 키
+     * @return DataResponse (전체 페이로드 포함)
+     */
+    fun buildDataResponseProto(requestId: String, size: String): com.protobench.proto.DataResponse {
+        val payload = getPayload(size)
+        return com.protobench.proto.DataResponse.newBuilder()
+            .setRequestId(requestId)
+            .setPayload(com.google.protobuf.ByteString.copyFrom(payload))
+            .setTimestamp(System.currentTimeMillis())
+            .setPayloadSize(payload.size)
+            .build()
+    }
+
     // ============================================
     // Phase 5: 복잡한 데이터 구조 생성
     // ============================================

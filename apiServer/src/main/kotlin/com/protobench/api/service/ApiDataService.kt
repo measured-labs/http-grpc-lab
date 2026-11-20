@@ -99,6 +99,35 @@ class ApiDataService(
     }
 
     /**
+     * HTTP/1.1 + Protobuf 방식으로 데이터 요청 (http-proto 경로)
+     *
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return ApiResponse
+     */
+    suspend fun getDataHttpProto(size: String = "1mb"): ApiResponse {
+        val requestId = UUID.randomUUID().toString()
+        val startNanos = System.nanoTime()
+
+        return try {
+            val response = httpClient.getDataProto(requestId, size)
+            val latencyNanos = System.nanoTime() - startNanos
+
+            benchmarkCollector.record(latencyNanos, response.payloadSize.toLong(), true)
+
+            ApiResponse(
+                requestId = requestId,
+                protocol = "HTTP/Protobuf",
+                payloadSize = response.payloadSize,
+                latencyMs = latencyNanos / 1_000_000.0
+            )
+        } catch (e: Exception) {
+            val latencyNanos = System.nanoTime() - startNanos
+            benchmarkCollector.record(latencyNanos, 0, false)
+            throw e
+        }
+    }
+
+    /**
      * gRPC Unary 방식으로 데이터 요청
      *
      * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)

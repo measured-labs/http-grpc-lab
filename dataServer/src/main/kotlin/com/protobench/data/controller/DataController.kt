@@ -24,6 +24,8 @@ data class ComplexDataJsonResponse<T>(
     val data: T
 )
 
+const val PROTOBUF_MEDIA_TYPE = "application/x-protobuf"
+
 /**
  * HTTP 데이터 컨트롤러
  *
@@ -79,6 +81,24 @@ class DataController(
             .header("X-Payload-Size", payload.size.toString())
             .header("X-Timestamp", System.currentTimeMillis().toString())
             .body(payload)
+    }
+
+    /**
+     * Protobuf 형식으로 페이로드 반환 (http-proto 경로)
+     *
+     * gRPC 단건(GetData)과 같은 DataResponse 메시지를 HTTP/1.1로 보낸다.
+     *
+     * @param requestId 요청 ID
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return Protobuf로 직렬화한 DataResponse
+     */
+    @GetMapping("/proto", produces = [PROTOBUF_MEDIA_TYPE])
+    fun getDataAsProto(
+        @RequestParam(defaultValue = "unknown") requestId: String,
+        @RequestParam(defaultValue = "1mb") size: String
+    ): ResponseEntity<ByteArray> {
+        val response = dataService.buildDataResponseProto(requestId, size)
+        return ResponseEntity.ok(response.toByteArray())
     }
 
     /**

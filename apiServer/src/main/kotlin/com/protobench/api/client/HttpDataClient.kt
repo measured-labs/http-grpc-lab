@@ -1,6 +1,7 @@
 package com.protobench.api.client
 
 import com.protobench.proto.ComplexDataResponse
+import com.protobench.proto.DataResponse
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
@@ -70,6 +71,24 @@ class HttpDataClient(
             .uri("/data/binary?requestId=$requestId&size=$size")
             .retrieve()
             .awaitBody()
+    }
+
+    /**
+     * Protobuf 형식으로 데이터 요청 (http-proto 경로)
+     *
+     * dataServer가 gRPC 단건과 같은 DataResponse 메시지를 HTTP/1.1로 보내고,
+     * 여기서 그것을 DataResponse 객체로 파싱한다.
+     *
+     * @param requestId 요청 ID
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return DataResponse (gRPC 경로와 같은 Protobuf 메시지)
+     */
+    suspend fun getDataProto(requestId: String, size: String = "1mb"): DataResponse {
+        val bytes: ByteArray = webClient.get()
+            .uri("/data/proto?requestId=$requestId&size=$size")
+            .retrieve()
+            .awaitBody()
+        return DataResponse.parseFrom(bytes)
     }
 
     // ============================================

@@ -31,14 +31,7 @@ class GrpcDataService(
      */
     override suspend fun getData(request: DataRequest): DataResponse {
         val size = if (request.size.isNullOrEmpty()) "1mb" else request.size
-        val payload = dataService.getPayload(size)
-
-        return DataResponse.newBuilder()
-            .setRequestId(request.requestId)
-            .setPayload(ByteString.copyFrom(payload))
-            .setTimestamp(System.currentTimeMillis())
-            .setPayloadSize(payload.size)
-            .build()
+        return dataService.buildDataResponseProto(request.requestId, size)
     }
 
     /**
