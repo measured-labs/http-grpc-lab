@@ -137,7 +137,7 @@ BENCH_CONFIG server=apiServer profile=matched read: tomcatMaxThreads=512 httpPoo
 | G | 잘못된 복잡도 값에 apiServer가 400이 아니라 500을 돌려준다(세 경로 같음) | 측정과 무관하다 | 없음 |
 | H | JSON 응답은 `Content-Length` 없이 chunked로 가고, Protobuf와 바이트 응답은 `Content-Length`를 먼저 정한다 | 형식과 프레임워크의 성질이다. Jackson은 스트림에 쓰면서 길이를 모르고, Protobuf는 `serializedSize`를, 바이트는 배열 길이를 미리 안다 | JSON 쪽에 청크 머리(크기 줄)가 붙고 받는 쪽이 청크를 이어 붙인다. 작은 응답에서는 무시할 만하다. JSON 경로의 비용에 들어간다 |
 | I | `default`에서는 dataServer가 HTTP 연결을 100요청마다(그리고 60초 쉬면) 끊고, gRPC는 연결을 유지한다 | `default`는 기본값을 손대지 않는다. `matched`에서는 끊지 않게 맞췄다(R4) | `default`의 HTTP 경로는 100요청마다 새 TCP 연결을 맺는 비용이 들어간다. 두 설정의 HTTP 결과가 다르면 이 차이 때문일 수 있다 |
-| J | 복잡도 축 데이터의 값은 프로세스를 띄울 때마다 새로 뽑는다(시드 고정 없음). 재시작하면 크기가 조금 달라진다(예: ultra Protobuf 21,370 → 21,342바이트) | 이번 지시 밖이라 고치지 않았다(task 01c에서 찾음) | 한 프로세스 안에서는 세 경로가 같다. 회차마다 서버를 다시 띄우면 회차 사이의 크기가 1% 안쪽으로 흔들린다. 필요하면 생성기의 난수 시드를 고정한다 |
+| J | (해소 — 커밋 `4c2650a`) 복잡도 축 데이터와 크기 축 바이트의 난수 시드와 시각 값을 고정했다. 재시작해도 같은 데이터가 나온다(`DataSeedTest`). | 없음 | — |
 | K | `http-proto`(복잡도 축)만 Protobuf 두 경로 중 측정 구간 안에서 결과를 감싸는 객체 하나(`ComplexProtoResult`)를 더 만든다(`grpc-unary`는 메시지를 그대로 받는다. 복잡도 축 `http-json`도 `ComplexJsonResult`로 감싼다) | 받은 본문의 바이트 수를 메시지와 함께 돌려주려고 감싼다(R3) | 작은 객체 하나라 밀리초 단위에서 구분되지 않는다 |
 
 ## 테스트
