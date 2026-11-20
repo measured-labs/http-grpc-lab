@@ -6,10 +6,24 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.awaitBody
+import java.util.Base64
 
 data class HttpDataResponse(
     val requestId: String,
     val payload: String,
+    val timestamp: Long,
+    val payloadSize: Int
+)
+
+/**
+ * http-json 경로의 응답을 바이트까지 되돌린 것
+ *
+ * 다른 경로(http-bytes, http-proto, grpc-unary)가 바이트까지 푸는 것과 같은 수준으로 맞추려고
+ * Base64 문자열을 바이트 배열로 되돌려 담는다.
+ */
+class DecodedDataResponse(
+    val requestId: String,
+    val payload: ByteArray,
     val timestamp: Long,
     val payloadSize: Int
 )
@@ -50,13 +64,22 @@ class HttpDataClient(
      *
      * @param requestId 요청 ID
      * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
-     * @return HttpDataResponse (Base64 인코딩된 payload 포함)
+     * JSON을 `HttpDataResponse`로 푼 뒤 Base64 문자열을 바이트로 되돌린다.
+     * 호출하는 쪽의 측정 구간(`nanoTime`) 안에서 실행된다.
+     *
+     * @return DecodedDataResponse (바이트로 되돌린 payload 포함)
      */
-    suspend fun getDataJson(requestId: String, size: String = "1mb"): HttpDataResponse {
-        return webClient.get()
+    suspend fun getDataJson(requestId: String, size: String = "1mb"): DecodedDataResponse {
+        val response: HttpDataResponse = webClient.get()
             .uri("/data/json?requestId=$requestId&size=$size")
             .retrieve()
             .awaitBody()
+        return DecodedDataResponse(
+            requestId = response.requestId,
+            payload = Base64.getDecoder().decode(response.payload),
+            timestamp = response.timestamp,
+            payloadSize = response.payloadSize
+        )
     }
 
     /**

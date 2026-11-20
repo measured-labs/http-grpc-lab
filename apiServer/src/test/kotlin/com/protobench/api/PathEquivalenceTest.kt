@@ -11,6 +11,7 @@ import io.grpc.Server
 import io.grpc.ServerBuilder
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.TestInstance
@@ -18,6 +19,7 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import java.net.InetSocketAddress
 import java.net.URI
+import java.util.Base64
 
 /**
  * apiServer가 HTTP + Protobuf 응답을 gRPC 응답과 같은 수준(같은 Protobuf 메시지 객체)까지 푸는지 확인한다.
@@ -40,6 +42,13 @@ class PathEquivalenceTest {
             createContext("/data/proto") { ex ->
                 val q = query(ex.requestURI)
                 respond(ex, dataResponse(q.getValue("requestId"), q.getValue("size")).toByteArray())
+            }
+            createContext("/data/json") { ex ->
+                val q = query(ex.requestURI)
+                val msg = dataResponse(q.getValue("requestId"), q.getValue("size"))
+                val json = """{"requestId":"${msg.requestId}","payload":"${Base64.getEncoder().encodeToString(msg.payload.toByteArray())}",""" +
+                    """"timestamp":${msg.timestamp},"payloadSize":${msg.payloadSize}}"""
+                respond(ex, json.toByteArray(), "application/json")
             }
             createContext("/data/complex/binary") { ex ->
                 val q = query(ex.requestURI)
@@ -82,6 +91,18 @@ class PathEquivalenceTest {
 
         // 서비스 계층이 기록·반환하는 크기도 같다
         assertEquals(service.getDataGrpc(size).payloadSize, service.getDataHttpProto(size).payloadSize)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["1kb", "10kb", "1mb"])
+    fun `크기 축 - http-json이 Base64를 원래 바이트로 되돌린다`(size: String) = runBlocking {
+        val viaJson = httpClient.getDataJson("req-3", size)
+        val viaGrpc = grpcClient.getData("req-3", size)
+
+        assertArrayEquals(viaGrpc.payload.toByteArray(), viaJson.payload)
+        assertEquals(PAYLOAD_SIZES.getValue(size), viaJson.payload.size)
+        assertEquals(viaGrpc.payloadSize, viaJson.payloadSize)
+        assertEquals(service.getDataGrpc(size).payloadSize, service.getDataHttpJson(size).payloadSize)
     }
 
     @ParameterizedTest
@@ -143,8 +164,12 @@ class PathEquivalenceTest {
     private fun query(uri: URI): Map<String, String> =
         uri.rawQuery.split("&").associate { it.substringBefore("=") to it.substringAfter("=") }
 
-    private fun respond(ex: com.sun.net.httpserver.HttpExchange, body: ByteArray) {
-        ex.responseHeaders.add("Content-Type", "application/x-protobuf")
+    private fun respond(
+        ex: com.sun.net.httpserver.HttpExchange,
+        body: ByteArray,
+        contentType: String = "application/x-protobuf"
+    ) {
+        ex.responseHeaders.add("Content-Type", contentType)
         ex.sendResponseHeaders(200, body.size.toLong())
         ex.responseBody.use { it.write(body) }
     }
