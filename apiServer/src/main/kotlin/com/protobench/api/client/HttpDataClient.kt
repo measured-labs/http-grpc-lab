@@ -2,7 +2,9 @@ package com.protobench.api.client
 
 import com.protobench.proto.ComplexDataResponse
 import com.protobench.proto.DataResponse
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.awaitBody
@@ -44,6 +46,16 @@ data class ComplexDataJsonResponse(
 )
 
 /**
+ * 복잡도 축 http-json의 응답과 실제로 받은 바이트 수
+ *
+ * dataServer가 JSON에 담는 serializedSize는 고정 추정치라 쓰지 않고, 받은 본문의 바이트 수를 기록한다.
+ */
+class ComplexJsonResult(
+    val response: ComplexDataJsonResponse,
+    val receivedBytes: Int
+)
+
+/**
  * dataServer HTTP 클라이언트
  *
  * WebClient를 사용하여 dataServer의 HTTP 엔드포인트를 호출한다.
@@ -58,6 +70,8 @@ class HttpDataClient(
         .baseUrl(baseUrl)
         .codecs { it.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) }
         .build()
+
+    private val objectMapper: ObjectMapper = Jackson2ObjectMapperBuilder.json().build()
 
     /**
      * JSON 형식으로 데이터 요청
@@ -123,13 +137,19 @@ class HttpDataClient(
      *
      * @param requestId 요청 ID
      * @param complexity 복잡도 (simple, medium, complex)
-     * @return ComplexDataJsonResponse
+     * @return ComplexJsonResult (응답 객체와 받은 본문의 바이트 수)
      */
-    suspend fun getComplexDataJson(requestId: String, complexity: String = "simple"): ComplexDataJsonResponse {
-        return webClient.get()
+    suspend fun getComplexDataJson(requestId: String, complexity: String = "simple"): ComplexJsonResult {
+        // http-proto 경로와 같이 본문을 byte[]로 모은 뒤 객체로 푼다(받은 바이트 수를 알 수 있다).
+        // objectMapper는 WebClient 기본 JSON 디코더와 같은 설정(Jackson2ObjectMapperBuilder)이다.
+        val bytes: ByteArray = webClient.get()
             .uri("/data/complex/json?requestId=$requestId&complexity=$complexity")
             .retrieve()
             .awaitBody()
+        return ComplexJsonResult(
+            response = objectMapper.readValue(bytes, ComplexDataJsonResponse::class.java),
+            receivedBytes = bytes.size
+        )
     }
 
     /**

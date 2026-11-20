@@ -201,16 +201,17 @@ class ApiDataService(
         val startNanos = System.nanoTime()
 
         return try {
-            val response = httpClient.getComplexDataJson(requestId, complexity)
+            val result = httpClient.getComplexDataJson(requestId, complexity)
             val latencyNanos = System.nanoTime() - startNanos
 
-            benchmarkCollector.record(latencyNanos, response.serializedSize.toLong(), true)
+            // dataServer가 담는 serializedSize는 추정치라 받은 본문의 바이트 수를 기록한다
+            benchmarkCollector.record(latencyNanos, result.receivedBytes.toLong(), true)
 
             ComplexApiResponse(
                 requestId = requestId,
                 protocol = "HTTP/JSON",
                 complexity = complexity,
-                serializedSize = response.serializedSize,
+                serializedSize = result.receivedBytes,
                 latencyMs = latencyNanos / 1_000_000.0
             )
         } catch (e: Exception) {

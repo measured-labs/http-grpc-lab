@@ -50,6 +50,10 @@ class PathEquivalenceTest {
                     """"timestamp":${msg.timestamp},"payloadSize":${msg.payloadSize}}"""
                 respond(ex, json.toByteArray(), "application/json")
             }
+            createContext("/data/complex/json") { ex ->
+                val q = query(ex.requestURI)
+                respond(ex, complexJson(q.getValue("complexity")), "application/json")
+            }
             createContext("/data/complex/binary") { ex ->
                 val q = query(ex.requestURI)
                 respond(ex, complexResponse(q.getValue("requestId"), q.getValue("complexity")).toByteArray())
@@ -120,7 +124,27 @@ class PathEquivalenceTest {
         )
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["simple", "medium", "complex", "ultra", "extreme"])
+    fun `복잡도 축 - http-json이 기록하는 크기는 실제로 받은 본문의 바이트 수다`(complexity: String) = runBlocking {
+        val body = complexJson(complexity)
+        val collector = BenchmarkCollector()
+        val svc = ApiDataService(httpClient, grpcClient, collector)
+
+        collector.start("HTTP/JSON", "size-check")
+        val result = svc.getComplexDataHttpJson(complexity)
+        val recorded = collector.end()!!
+
+        // dataServer가 JSON에 담는 serializedSize(고정 추정치)가 아니다
+        assertEquals(body.size, result.serializedSize)
+        assertEquals(body.size.toLong(), recorded.dataTransfer.totalBytes)
+    }
+
     // ---- 가짜 dataServer의 응답 (요청마다 같은 값) ----
+
+    /** 실제 dataServer가 보낸 JSON(배열은 2개, 큰 맵은 3개 항목까지 줄임) */
+    private fun complexJson(complexity: String): ByteArray =
+        javaClass.getResourceAsStream("/complex-json/$complexity.json")!!.use { it.readBytes() }
 
     private val PAYLOAD_SIZES = mapOf("1kb" to 1024, "10kb" to 10 * 1024, "1mb" to 1024 * 1024)
 
