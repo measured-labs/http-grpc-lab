@@ -1,0 +1,10 @@
+# 측정 설정 matched: 연결·스레드 수를 하나의 값으로 맞춘다.
+# 켜기: SPRING_PROFILES_ACTIVE=matched (값은 BENCH_MAX_CONCURRENCY, 없으면 512)
+# 기동 로그의 BENCH_CONFIG 줄에 실제로 적용된 값이 찍힌다.
+bench:
+  max-concurrency: ${BENCH_MAX_CONCURRENCY:512}
+
+server:
+  tomcat:
+    threads:
+      max: ${bench.max-concurrency}

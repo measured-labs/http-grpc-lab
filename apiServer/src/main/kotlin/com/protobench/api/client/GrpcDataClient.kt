@@ -25,6 +25,9 @@ class GrpcDataClient(
     private lateinit var channel: ManagedChannel
     private lateinit var stub: DataServiceGrpcKt.DataServiceCoroutineStub
 
+    /** 채널 수 — 두 설정 모두 1개(HTTP/2 연결 하나에 요청을 겹쳐 보낸다) */
+    val channelCount: Int = 1
+
     /**
      * gRPC 채널 초기화
      *

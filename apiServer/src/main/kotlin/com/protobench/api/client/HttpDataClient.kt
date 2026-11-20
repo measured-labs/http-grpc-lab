@@ -4,7 +4,12 @@ import com.protobench.proto.ComplexDataResponse
 import com.protobench.proto.DataResponse
 import com.fasterxml.jackson.databind.JavaType
 import com.fasterxml.jackson.databind.ObjectMapper
+import jakarta.annotation.PreDestroy
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.http.client.reactive.ReactorClientHttpConnector
+import reactor.netty.http.HttpResources
+import reactor.netty.http.client.HttpClient
+import reactor.netty.resources.ConnectionProvider
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
@@ -50,12 +55,39 @@ class ComplexJsonResult(
  */
 @Component
 class HttpDataClient(
-    @Value("\${data-server.http.url}") private val baseUrl: String
+    @Value("\${data-server.http.url}") private val baseUrl: String,
+    @Value("\${bench.max-concurrency:#{null}}") maxConcurrency: Int? = null
 ) {
+    /**
+     * 연결 풀
+     *
+     * - `default`(maxConcurrency 없음): 손대지 않는다. WebClient 기본 커넥터가 쓰는 reactor-netty 전역 풀
+     *   (`HttpResources`: 최대 연결 500, 대기 상한 그 두 배, 대기 시간 45초 — reactor-netty 1.1.15).
+     * - `matched`: 최대 연결 수와 대기 상한을 모두 maxConcurrency로 둔다(대기 시간은 기본값).
+     *   reactor-netty의 최대 연결 수는 원격 주소(여기서는 dataServer 하나)마다 적용된다.
+     */
+    private val connectionProvider: ConnectionProvider? = maxConcurrency?.let { n ->
+        ConnectionProvider.builder("bench-http")
+            .maxConnections(n)
+            .pendingAcquireMaxCount(n)
+            .build()
+    }
+
+    /** 실제로 쓰는 풀의 설정 (기동 로그용) */
+    val poolMaxConnections: Int = (connectionProvider ?: HttpResources.get()).maxConnections()
+    val poolPendingAcquireMaxCount: Int = maxConcurrency ?: (2 * poolMaxConnections)
+    val poolPendingAcquireTimeoutMs: Long = ConnectionProvider.DEFAULT_POOL_ACQUIRE_TIMEOUT
+
     private val webClient = WebClient.builder()
         .baseUrl(baseUrl)
         .codecs { it.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) }
+        .apply { b -> connectionProvider?.let { b.clientConnector(ReactorClientHttpConnector(HttpClient.create(it))) } }
         .build()
+
+    @PreDestroy
+    fun close() {
+        connectionProvider?.dispose()
+    }
 
     // WebClient 기본 JSON 디코더와 같은 설정에서, 모르는 필드는 실패로 둔다
     // (dataServer DTO와 모양이 어긋나면 값을 조용히 버리지 않고 드러나게).
