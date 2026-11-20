@@ -16,8 +16,12 @@ import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext
 import org.springframework.test.context.ActiveProfiles
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
+import java.net.Socket
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.EmptyCoroutineContext
@@ -62,6 +66,17 @@ class BenchConcurrencyConfigTest {
             }
             assertTrue(executor.completedTaskCount > before, "gRPC 호출이 설정한 실행기에서 돌지 않았다")
         }
+
+        @LocalServerPort var port: Int = 0
+
+        @Test
+        fun `HTTP 연결을 요청 수로 끊지 않는다`() {
+            val keepAlive = BenchConfigLogger.tomcatKeepAlive(ctx)!!
+            assertEquals(-1, keepAlive.maxKeepAliveRequests)
+            assertEquals(-1, keepAlive.keepAliveTimeoutMs)
+            // 연결 하나로 150요청을 보내도 서버가 끊지 않는다(기본값이면 100번째에서 끊는다)
+            assertEquals(null, requestsUntilServerCloses(port, 150))
+        }
     }
 
     @Nested
@@ -78,6 +93,48 @@ class BenchConcurrencyConfigTest {
             assertEquals(200, BenchConfigLogger.tomcatMaxThreads(ctx))
             assertNull(grpcServerExecutor.executor)
             assertSame(EmptyCoroutineContext, grpcServerExecutor.coroutineContext)
+        }
+
+        @LocalServerPort var port: Int = 0
+
+        @Test
+        fun `HTTP 연결 유지는 Tomcat 기본값(100요청)이다`() {
+            assertEquals(100, BenchConfigLogger.tomcatKeepAlive(ctx)!!.maxKeepAliveRequests)
+            assertEquals(100, requestsUntilServerCloses(port, 150))
+        }
+    }
+
+    companion object {
+        /**
+         * 연결 하나로 요청을 최대 [max]번 보내고, 서버가 `Connection: close`로 끊겠다고 한 요청이 몇 번째인지 돌려준다.
+         * 끝까지 끊지 않으면 null.
+         */
+        fun requestsUntilServerCloses(port: Int, max: Int): Int? = Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 5000
+            val input = BufferedInputStream(socket.getInputStream())
+            val out = socket.getOutputStream()
+            for (i in 1..max) {
+                out.write("GET /data/binary?requestId=r$i&size=1kb HTTP/1.1\r\nHost: localhost\r\n\r\n".toByteArray())
+                out.flush()
+                val head = readHead(input)
+                assertTrue(head.startsWith("HTTP/1.1 200"), head)
+                val length = Regex("(?im)^content-length:\\s*(\\d+)").find(head)!!.groupValues[1].toInt()
+                input.readNBytes(length)
+                if (Regex("(?im)^connection:\\s*close").containsMatchIn(head)) return@use i
+            }
+            null
+        }
+
+        private fun readHead(input: BufferedInputStream): String {
+            val buf = ByteArrayOutputStream()
+            var last4 = 0
+            while (last4 != 0x0D0A0D0A) {
+                val b = input.read()
+                check(b >= 0) { "연결이 닫혔다" }
+                buf.write(b)
+                last4 = (last4 shl 8) or b
+            }
+            return buf.toString(Charsets.ISO_8859_1)
         }
     }
 }

@@ -31,6 +31,8 @@ class BenchConfigLogger(
                 "httpPoolMaxConnections=${httpDataClient.poolMaxConnections} " +
                 "| set: httpPoolPendingAcquireMaxCount=${httpDataClient.poolPendingAcquireMaxCount} " +
                 "httpPoolPendingAcquireTimeoutMs=${httpDataClient.poolPendingAcquireTimeoutMs} " +
+                "httpPoolMaxIdleTimeMs=${httpDataClient.poolMaxIdleTimeMs} " +
+                "httpPoolMaxLifeTimeMs=${httpDataClient.poolMaxLifeTimeMs} " +
                 "grpcChannels=${grpcDataClient.channelCount}"
         )
     }

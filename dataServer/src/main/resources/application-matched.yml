@@ -8,3 +8,7 @@ server:
   tomcat:
     threads:
       max: ${bench.max-concurrency}
+    # HTTP 연결을 끊지 않는다(gRPC 서버가 연결을 유지하는 것과 같게).
+    # Tomcat 기본은 연결 하나에 100요청을 처리하고 끊고, 60초 쉬면 끊는다.
+    max-keep-alive-requests: -1
+    keep-alive-timeout: -1ms

@@ -103,6 +103,13 @@ class HttpDataClient(
     /** 대기 시간 — reactor-netty 상수 */
     val poolPendingAcquireTimeoutMs: Long = ConnectionProvider.DEFAULT_POOL_ACQUIRE_TIMEOUT
 
+    /**
+     * 유휴 연결을 닫는 시간과 연결 수명 — reactor-netty 상수(두 설정 모두 지정하지 않는다). -1 = 닫지 않음.
+     * 클라이언트 쪽에서 연결을 일찍 닫는 설정이 없어서 `matched`에서도 따로 맞추지 않는다.
+     */
+    val poolMaxIdleTimeMs: Long = ConnectionProvider.DEFAULT_POOL_MAX_IDLE_TIME
+    val poolMaxLifeTimeMs: Long = ConnectionProvider.DEFAULT_POOL_MAX_LIFE_TIME
+
     private val webClient = WebClient.builder()
         .baseUrl(baseUrl)
         .codecs { it.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) }
