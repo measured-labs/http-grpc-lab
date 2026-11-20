@@ -2,6 +2,10 @@ package com.protobench.api
 
 import com.google.protobuf.ByteString
 import com.protobench.api.benchmark.BenchmarkCollector
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.protobench.api.client.*
 import com.protobench.api.client.GrpcDataClient
 import com.protobench.api.client.HttpDataClient
 import com.protobench.api.service.ApiDataService
@@ -13,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.params.ParameterizedTest
@@ -138,6 +143,27 @@ class PathEquivalenceTest {
         // dataServer가 JSON에 담는 serializedSize(고정 추정치)가 아니다
         assertEquals(body.size, result.serializedSize)
         assertEquals(body.size.toLong(), recorded.dataTransfer.totalBytes)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["simple", "medium", "complex", "ultra", "extreme"])
+    fun `복잡도 축 - http-json이 타입이 있는 객체로 풀고 필드 값이 보낸 것과 같다`(complexity: String) = runBlocking {
+        val expectedClass = mapOf(
+            "simple" to SimpleDataDto::class, "medium" to MediumDataDto::class, "complex" to ComplexDataDto::class,
+            "ultra" to UltraDataDto::class, "extreme" to ExtremeDataDto::class
+        ).getValue(complexity)
+        val mapper = ObjectMapper().registerKotlinModule()
+        val sent = mapper.readTree(complexJson(complexity))
+
+        val response = httpClient.getComplexDataJson("req-4", complexity).response
+
+        assertEquals(expectedClass, response.data::class)
+        // 객체를 다시 트리로 바꾸면 보낸 JSON과 같다(모든 필드가 같은 값으로 들어갔다). 숫자는 값으로 비교한다.
+        val numericAware = Comparator<JsonNode> { a, b ->
+            if (a.isNumber && b.isNumber) a.decimalValue().compareTo(b.decimalValue()) else if (a == b) 0 else 1
+        }
+        val roundTrip = mapper.valueToTree<JsonNode>(response)
+        assertTrue(sent.equals(numericAware, roundTrip), "보낸 JSON:\n$sent\n푼 객체:\n$roundTrip")
     }
 
     // ---- 가짜 dataServer의 응답 (요청마다 같은 값) ----

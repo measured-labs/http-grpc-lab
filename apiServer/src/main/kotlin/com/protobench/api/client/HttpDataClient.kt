@@ -2,6 +2,7 @@ package com.protobench.api.client
 
 import com.protobench.proto.ComplexDataResponse
 import com.protobench.proto.DataResponse
+import com.fasterxml.jackson.databind.JavaType
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
@@ -30,28 +31,13 @@ class DecodedDataResponse(
     val payloadSize: Int
 )
 
-// ============================================
-// Phase 5: 복잡한 데이터 DTO
-// ============================================
-
-/**
- * 복잡한 데이터 JSON 응답 (공통)
- */
-data class ComplexDataJsonResponse(
-    val requestId: String,
-    val timestamp: Long,
-    val serializedSize: Int,
-    val complexity: String,
-    val data: Map<String, Any>
-)
-
 /**
  * 복잡도 축 http-json의 응답과 실제로 받은 바이트 수
  *
  * dataServer가 JSON에 담는 serializedSize는 고정 추정치라 쓰지 않고, 받은 본문의 바이트 수를 기록한다.
  */
 class ComplexJsonResult(
-    val response: ComplexDataJsonResponse,
+    val response: ComplexDataJsonResponse<*>,
     val receivedBytes: Int
 )
 
@@ -71,7 +57,22 @@ class HttpDataClient(
         .codecs { it.defaultCodecs().maxInMemorySize(10 * 1024 * 1024) }
         .build()
 
-    private val objectMapper: ObjectMapper = Jackson2ObjectMapperBuilder.json().build()
+    // WebClient 기본 JSON 디코더와 같은 설정에서, 모르는 필드는 실패로 둔다
+    // (dataServer DTO와 모양이 어긋나면 값을 조용히 버리지 않고 드러나게).
+    private val objectMapper: ObjectMapper = Jackson2ObjectMapperBuilder.json()
+        .failOnUnknownProperties(true)
+        .build()
+
+    /** 복잡도별 `data`의 타입 (`ComplexDataJsonResponse<T>`) */
+    private val complexJsonTypes: Map<String, JavaType> = mapOf(
+        "simple" to SimpleDataDto::class.java,
+        "medium" to MediumDataDto::class.java,
+        "complex" to ComplexDataDto::class.java,
+        "ultra" to UltraDataDto::class.java,
+        "extreme" to ExtremeDataDto::class.java
+    ).mapValues { (_, dataClass) ->
+        objectMapper.typeFactory.constructParametricType(ComplexDataJsonResponse::class.java, dataClass)
+    }
 
     /**
      * JSON 형식으로 데이터 요청
@@ -140,14 +141,16 @@ class HttpDataClient(
      * @return ComplexJsonResult (응답 객체와 받은 본문의 바이트 수)
      */
     suspend fun getComplexDataJson(requestId: String, complexity: String = "simple"): ComplexJsonResult {
-        // http-proto 경로와 같이 본문을 byte[]로 모은 뒤 객체로 푼다(받은 바이트 수를 알 수 있다).
+        // http-proto 경로와 같이 본문을 byte[]로 모은 뒤 타입이 있는 객체로 푼다(받은 바이트 수를 알 수 있다).
         // objectMapper는 WebClient 기본 JSON 디코더와 같은 설정(Jackson2ObjectMapperBuilder)이다.
         val bytes: ByteArray = webClient.get()
             .uri("/data/complex/json?requestId=$requestId&complexity=$complexity")
             .retrieve()
             .awaitBody()
+        val type = complexJsonTypes[complexity.lowercase()]
+            ?: throw IllegalArgumentException("Invalid complexity: $complexity")
         return ComplexJsonResult(
-            response = objectMapper.readValue(bytes, ComplexDataJsonResponse::class.java),
+            response = objectMapper.readValue<ComplexDataJsonResponse<*>>(bytes, type),
             receivedBytes = bytes.size
         )
     }
