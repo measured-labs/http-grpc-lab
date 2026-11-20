@@ -29,6 +29,7 @@ class BenchConfigLogger(
             "BENCH_CONFIG server=apiServer profile=$profiles " +
                 "read: tomcatMaxThreads=${tomcatMaxThreads ?: "unknown"} " +
                 "httpPoolMaxConnections=${httpDataClient.poolMaxConnections} " +
+                "httpClientAcceptGzip=${httpDataClient.acceptGzip} " +
                 "| set: httpPoolPendingAcquireMaxCount=${httpDataClient.poolPendingAcquireMaxCount} " +
                 "httpPoolPendingAcquireTimeoutMs=${httpDataClient.poolPendingAcquireTimeoutMs} " +
                 "httpPoolMaxIdleTimeMs=${httpDataClient.poolMaxIdleTimeMs} " +

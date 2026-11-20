@@ -88,11 +88,15 @@ class HttpDataClient(
      * - `default`: Spring의 기본 커넥터 `ReactorClientHttpConnector()`가 만드는 것과 같다
      *   (spring-web 6.1.3 바이트코드: `HttpClient.create()` → 전역 풀). 기본 커넥터를 쓰면 이 객체를
      *   밖에서 읽을 수 없어서, 같은 것을 직접 만들어 넘긴다.
-     * - `matched`: [connectionProvider]를 쓴다.
+     * - `matched`: [connectionProvider]를 쓴다. `compress(true)`(요청에 `Accept-Encoding: gzip`)는 기본 커넥터와 같게 켠다.
+     *   dataServer는 응답을 압축하지 않으므로(Spring Boot 기본 `server.compression.enabled=false`) 본문은 같다.
      */
-    private val httpClient: HttpClient = connectionProvider
+    private val httpClient: HttpClient = (connectionProvider
         ?.let { HttpClient.create(it) }
-        ?: HttpClient.create().compress(true)
+        ?: HttpClient.create()).compress(true)
+
+    /** 요청에 `Accept-Encoding: gzip`을 붙이는지 — 커넥터에 넘긴 HttpClient에서 읽는다(기동 로그용) */
+    val acceptGzip: Boolean = httpClient.configuration().isAcceptGzip
 
     /** 실제로 쓰는 풀의 최대 연결 수 — 커넥터에 넘긴 HttpClient의 ConnectionProvider에서 읽는다(기동 로그용) */
     val poolMaxConnections: Int = httpClient.configuration().connectionProvider().maxConnections()

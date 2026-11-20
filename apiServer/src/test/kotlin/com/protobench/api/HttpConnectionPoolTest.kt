@@ -35,6 +35,7 @@ class HttpConnectionPoolTest {
     private val accepted = AtomicInteger()
     private val arrived = CountDownLatch(REQUESTS)
     private val sockets = mutableListOf<Socket>()
+    private val heads = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
     @BeforeEach
     fun start() {
@@ -75,13 +76,24 @@ class HttpConnectionPoolTest {
 
     /** 요청 머리(빈 줄까지)를 읽는다. 연결이 닫히면 false. */
     private fun readHead(input: BufferedInputStream): Boolean {
+        val head = StringBuilder()
         var last4 = 0
         while (true) {
             val b = input.read()
             if (b < 0) return false
+            head.append(b.toChar())
             last4 = (last4 shl 8) or b
-            if (last4 == 0x0D0A0D0A) return true
+            if (last4 == 0x0D0A0D0A) {
+                heads.add(head.toString())
+                return true
+            }
         }
+    }
+
+    /** 두 설정 모두 Spring 기본 커넥터처럼 `Accept-Encoding: gzip`을 보낸다 */
+    private fun assertAcceptGzip() {
+        assertEquals(REQUESTS, heads.size)
+        heads.forEach { assertTrue(Regex("(?im)^accept-encoding:.*gzip").containsMatchIn(it), it) }
     }
 
     private fun sendConcurrently(client: HttpDataClient) = runBlocking {
@@ -97,6 +109,8 @@ class HttpConnectionPoolTest {
             assertTrue(results.all { it.contentEquals("ok".toByteArray()) })
             assertEquals(POOL, accepted.get(), "맺어진 연결 수")
             assertEquals(POOL, client.poolMaxConnections)
+            assertAcceptGzip()
+            assertTrue(client.acceptGzip)
         } finally {
             client.close()
         }
@@ -108,6 +122,7 @@ class HttpConnectionPoolTest {
         try {
             sendConcurrently(client)
             assertEquals(REQUESTS, accepted.get(), "맺어진 연결 수")
+            assertAcceptGzip()
         } finally {
             client.close()
         }
