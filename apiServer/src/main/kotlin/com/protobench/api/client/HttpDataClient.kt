@@ -46,6 +46,16 @@ class ComplexJsonResult(
 )
 
 /**
+ * 복잡도 축 http-proto의 응답과 실제로 받은 바이트 수
+ *
+ * 크기를 메시지의 `serializedSize`로 다시 계산하지 않고(측정 뒤에 메시지를 한 번 더 훑게 된다) 받은 본문의 바이트 수를 쓴다.
+ */
+class ComplexProtoResult(
+    val response: ComplexDataResponse,
+    val receivedBytes: Int
+)
+
+/**
  * dataServer HTTP 클라이언트
  *
  * WebClient를 사용하여 dataServer의 HTTP 엔드포인트를 호출한다.
@@ -209,13 +219,13 @@ class HttpDataClient(
      *
      * @param requestId 요청 ID
      * @param complexity 복잡도 (simple, medium, complex)
-     * @return ComplexDataResponse (gRPC 경로와 같은 Protobuf 메시지)
+     * @return ComplexProtoResult (gRPC 경로와 같은 Protobuf 메시지와 받은 본문의 바이트 수)
      */
-    suspend fun getComplexDataBinary(requestId: String, complexity: String = "simple"): ComplexDataResponse {
+    suspend fun getComplexDataBinary(requestId: String, complexity: String = "simple"): ComplexProtoResult {
         val bytes: ByteArray = webClient.get()
             .uri("/data/complex/binary?requestId=$requestId&complexity=$complexity")
             .retrieve()
             .awaitBody()
-        return ComplexDataResponse.parseFrom(bytes)
+        return ComplexProtoResult(ComplexDataResponse.parseFrom(bytes), bytes.size)
     }
 }

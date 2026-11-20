@@ -40,6 +40,11 @@ class ApiDataService(
     private val benchmarkCollector: BenchmarkCollector
 ) {
 
+    companion object {
+        /** 크기를 재지 않았음을 뜻하는 값 (복잡도 축 grpc-unary) */
+        const val SIZE_UNKNOWN = -1
+    }
+
     /**
      * HTTP JSON 방식으로 데이터 요청
      *
@@ -232,16 +237,17 @@ class ApiDataService(
         val startNanos = System.nanoTime()
 
         return try {
-            val response = httpClient.getComplexDataBinary(requestId, complexity)
+            val result = httpClient.getComplexDataBinary(requestId, complexity)
             val latencyNanos = System.nanoTime() - startNanos
 
-            benchmarkCollector.record(latencyNanos, response.serializedSize.toLong(), true)
+            // 받은 본문의 바이트 수(= 보낸 Protobuf 바이트 수). serializedSize로 메시지를 다시 훑지 않는다
+            benchmarkCollector.record(latencyNanos, result.receivedBytes.toLong(), true)
 
             ComplexApiResponse(
                 requestId = requestId,
                 protocol = "HTTP/Binary(Protobuf)",
                 complexity = complexity,
-                serializedSize = response.serializedSize,
+                serializedSize = result.receivedBytes,
                 latencyMs = latencyNanos / 1_000_000.0
             )
         } catch (e: Exception) {
@@ -262,16 +268,18 @@ class ApiDataService(
         val startNanos = System.nanoTime()
 
         return try {
-            val response = grpcClient.getComplexData(requestId, complexity)
+            grpcClient.getComplexData(requestId, complexity)
             val latencyNanos = System.nanoTime() - startNanos
 
-            benchmarkCollector.record(latencyNanos, response.serializedSize.toLong(), true)
+            // gRPC 스텁은 받은 바이트 수를 내주지 않는다. serializedSize로 메시지를 다시 훑지 않고
+            // 값이 없음(SIZE_UNKNOWN)을 기록한다. 전송량은 k6가 잰 값을 쓴다.
+            benchmarkCollector.record(latencyNanos, SIZE_UNKNOWN.toLong(), true)
 
             ComplexApiResponse(
                 requestId = requestId,
                 protocol = "gRPC/Unary",
                 complexity = complexity,
-                serializedSize = response.serializedSize,
+                serializedSize = SIZE_UNKNOWN,
                 latencyMs = latencyNanos / 1_000_000.0
             )
         } catch (e: Exception) {

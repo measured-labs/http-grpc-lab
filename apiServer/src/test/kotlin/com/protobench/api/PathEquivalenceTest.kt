@@ -117,16 +117,32 @@ class PathEquivalenceTest {
     @ParameterizedTest
     @ValueSource(strings = ["simple", "medium", "complex", "ultra", "extreme"])
     fun `복잡도 축 - HTTP Protobuf와 gRPC가 같은 ComplexDataResponse 객체를 내놓는다`(complexity: String) = runBlocking {
-        val viaHttp = httpClient.getComplexDataBinary("req-2", complexity)
+        val viaHttp = httpClient.getComplexDataBinary("req-2", complexity).response
         val viaGrpc = grpcClient.getComplexData("req-2", complexity)
 
         assertEquals(viaGrpc, viaHttp)
         assertEquals(complexity.uppercase(), viaHttp.dataCase.name)
+    }
 
-        assertEquals(
-            service.getComplexDataGrpc(complexity).serializedSize,
-            service.getComplexDataHttpBinary(complexity).serializedSize
-        )
+    @ParameterizedTest
+    @ValueSource(strings = ["simple", "medium", "complex", "ultra", "extreme"])
+    fun `복잡도 축 - http-proto는 받은 바이트 수를, grpc-unary는 값 없음을 기록한다`(complexity: String) = runBlocking {
+        val collector = BenchmarkCollector()
+        val svc = ApiDataService(httpClient, grpcClient, collector)
+
+        collector.start("HTTP/Binary(Protobuf)", "size-check")
+        val proto = svc.getComplexDataHttpBinary(complexity)
+        val protoRecorded = collector.end()!!
+        // 가짜 서버가 보낸 바이트 수 (requestId는 서비스가 만든 UUID — 길이가 같다)
+        val sent = complexResponse(proto.requestId, complexity).serializedSize
+        assertEquals(sent, proto.serializedSize)
+        assertEquals(sent.toLong(), protoRecorded.dataTransfer.totalBytes)
+
+        collector.start("gRPC/Unary", "size-check")
+        val grpc = svc.getComplexDataGrpc(complexity)
+        val grpcRecorded = collector.end()!!
+        assertEquals(ApiDataService.SIZE_UNKNOWN, grpc.serializedSize)
+        assertEquals(-1L, grpcRecorded.dataTransfer.totalBytes)
     }
 
     @ParameterizedTest
