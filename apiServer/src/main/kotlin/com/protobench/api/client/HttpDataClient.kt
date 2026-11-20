@@ -1,5 +1,6 @@
 package com.protobench.api.client
 
+import com.protobench.proto.ComplexDataResponse
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
@@ -92,14 +93,17 @@ class HttpDataClient(
     /**
      * 복잡한 데이터를 Protobuf Binary 형식으로 요청
      *
+     * gRPC 경로와 같은 수준까지 풀기 위해 응답 바이트를 ComplexDataResponse 객체로 파싱한다.
+     *
      * @param requestId 요청 ID
      * @param complexity 복잡도 (simple, medium, complex)
-     * @return 바이너리 바이트 배열 (Protobuf 인코딩)
+     * @return ComplexDataResponse (gRPC 경로와 같은 Protobuf 메시지)
      */
-    suspend fun getComplexDataBinary(requestId: String, complexity: String = "simple"): ByteArray {
-        return webClient.get()
+    suspend fun getComplexDataBinary(requestId: String, complexity: String = "simple"): ComplexDataResponse {
+        val bytes: ByteArray = webClient.get()
             .uri("/data/complex/binary?requestId=$requestId&complexity=$complexity")
             .retrieve()
             .awaitBody()
+        return ComplexDataResponse.parseFrom(bytes)
     }
 }

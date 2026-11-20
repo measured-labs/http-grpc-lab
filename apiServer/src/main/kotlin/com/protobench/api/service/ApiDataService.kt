@@ -205,13 +205,13 @@ class ApiDataService(
             val response = httpClient.getComplexDataBinary(requestId, complexity)
             val latencyNanos = System.nanoTime() - startNanos
 
-            benchmarkCollector.record(latencyNanos, response.size.toLong(), true)
+            benchmarkCollector.record(latencyNanos, response.serializedSize.toLong(), true)
 
             ComplexApiResponse(
                 requestId = requestId,
                 protocol = "HTTP/Binary(Protobuf)",
                 complexity = complexity,
-                serializedSize = response.size,
+                serializedSize = response.serializedSize,
                 latencyMs = latencyNanos / 1_000_000.0
             )
         } catch (e: Exception) {
