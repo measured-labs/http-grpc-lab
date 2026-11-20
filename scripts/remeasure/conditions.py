@@ -95,6 +95,11 @@ def main():
         "commit": env["COMMIT"],
         "trackedFilesClean": not tracked_dirty, "trackedFilesDirty": tracked_dirty,
         "jars": [x for x in env.get("JARS", "").splitlines() if x],
+        # true = 시작할 때 이 커밋에서 ./gradlew bootJar로 빌드한 jar로 쟀다
+        "jarsBuiltAtStart": env.get("BUILD") == "1",
+        # true = 추적 파일에 커밋하지 않은 변경(docs/plans/ 제외)이 있어도 시작하게 했다(--allow-dirty)
+        "allowDirty": env.get("ALLOW_DIRTY") == "1",
+        "onlyConditions": [x for x in env.get("ONLY_CONDITIONS", "").split(",") if x] or None,
         "jdk": env["JDK"], "k6": env["K6V"], "cores": int(env["CORES"]), "cpuModel": env["CPU_MODEL"],
         "machine": "k6와 두 서버(apiServer, dataServer)가 같은 머신에서 돈다",
         "benchConfig": lines(state, "bench_config"),
@@ -106,6 +111,14 @@ def main():
         "loadavgBefore": " ".join(loadavg_before.split()[:3]),
         "loadavgAfter": " ".join(loadavg_after.split()[:3]),
         "maxLoad1": float(env["MAX_LOAD"]),
+        "loadWait": {
+            # 회차를 시작하기 전에 1분 부하 평균이 maxLoad1 아래로 내려가길 기다린 시간
+            "waitedSeconds": int(read(state, "load_wait_seconds")) if read(state, "load_wait_seconds") else None,
+            # true = 최대 대기 시간을 넘어 기준을 넘은 채 시작했다(그때의 값 = load1Before)
+            "startedAboveMax": read(state, "load_wait_exceeded") == "1" if read(state, "load_wait_exceeded") else None,
+            "maxWaitSeconds": int(env["MAX_WAIT"]),
+            "checkIntervalSeconds": int(env["LOAD_CHECK_INTERVAL"]),
+        },
         "topProcessesBefore": lines(state, "top_before"),
         "warmup": {
             "iterationsPerTarget": int(env["WARMUP"]), "vus": int(env["WARMUP_VUS"]),

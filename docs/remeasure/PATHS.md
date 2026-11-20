@@ -45,7 +45,7 @@
 | 크기·동시 사용자 | 네 경로 | 원래 페이로드 크기(`payloadSize`). 전송 바이트가 아니다(남긴 차이 E). 메시지의 `payloadSize` 필드나 배열 길이를 읽으므로 메시지를 다시 훑지 않는다(복잡도 축 같은 문제가 없다) |
 | 복잡도 | `http-json` | **apiServer가 받은 본문의 바이트 수**(전: dataServer가 담은 고정 추정치 150/800/5000/15000/50000). dataServer가 JSON에 담는 `serializedSize`는 여전히 추정치이고 apiServer는 쓰지 않는다 |
 | 복잡도 | `http-proto` | **apiServer가 받은 본문의 바이트 수**(= 보낸 Protobuf 바이트 수). 전: 측정이 끝난 뒤 `serializedSize`로 메시지 트리를 한 번 더 훑어 계산 |
-| 복잡도 | `grpc-unary` | **-1 (값 없음, `ApiDataService.SIZE_UNKNOWN`)**. gRPC 스텁은 받은 바이트 수를 내주지 않고, `serializedSize`를 부르면 메시지를 한 번 더 훑게 된다. 전송량은 k6가 잰 값을 쓴다. `BenchmarkCollector`는 기록에 -1이 섞이면 전송량 합계·평균도 -1로 둔다 |
+| 복잡도 | `grpc-unary` | **-1 (값 없음, `ApiDataService.SIZE_UNKNOWN`)**. gRPC 스텁은 받은 바이트 수를 내주지 않고, `serializedSize`를 부르면 메시지를 한 번 더 훑게 된다. 전송량은 조건과 경로마다 한 번 잰 크기 표(`results/2026-11/sizes.json`)를 쓴다. `BenchmarkCollector`는 기록에 -1이 섞이면 전송량 합계·평균도 -1로 둔다 |
 
 ## 보내는 쪽 복사 (dataServer)
 
@@ -99,6 +99,7 @@ BENCH_CONFIG server=apiServer profile=matched read: tomcatMaxThreads=512 httpPoo
 
 - **측정 구간**: 모든 경로가 `ApiDataService`에서 클라이언트 호출 하나(요청 보내기 → 쓸 수 있는 객체 받기)만 잰다. 객체로 푸는 시간(Jackson, Base64 되돌리기, `parseFrom`, gRPC 마샬러)이 모두 구간 안에 있다.
 - **apiServer가 받는 쪽의 복사**: `http-proto`와 복잡도 축 `http-json`은 WebClient가 응답을 `byte[]`로 모은 뒤 푼다(`parseFrom(byte[])`, `ObjectMapper.readValue(byte[])`). gRPC 1.61의 마샬러(`ProtoLiteUtils.MessageMarshaller`)도 스트림을 `byte[]`로 읽은 뒤 `CodedInputStream.newInstance(byte[])`로 파싱하고 aliasing을 켜지 않으므로 같은 복사를 한다(jar의 바이트코드로 확인). 크기 축 `http-json`은 WebClient의 Jackson 디코더가 모은 버퍼에서 바로 푼다(전과 같음).
+- **두 서버 사이의 전송량**: k6의 `data_received`는 apiServer → k6의 작은 JSON이라 이 구간의 값이 아니다. 데이터가 고정이라 조건마다 크기가 일정하므로 `scripts/remeasure/sizes.sh`가 dataServer의 HTTP 엔드포인트를 조건마다 한 번 불러 본문 바이트 수를 `results/2026-11/sizes.json`에 남긴다. `grpc-unary`는 `http-proto`와 같은 메시지 + gRPC 메시지 머리 5바이트(HTTP/2 프레임 제외)로 적는다.
 - **크기 상한**: WebClient `maxInMemorySize` 10MB, gRPC `maxInboundMessageSize` 10MB.
 - **k6 → apiServer**: 모든 경로가 HTTP/1.1, 컨트롤러는 Tomcat 스레드에서 `runBlocking`, 응답은 같은 작은 JSON.
 - **데이터**: 크기 축의 바이트는 프로세스 안에서 경로마다 같다(테스트로 확인). 복잡도 축은 시작 때 한 번 만든 같은 객체라 세 경로의 내용이 필드 값까지 같다(테스트로 확인, 실제 서버에서 두 설정 모두 다섯 단계를 세 경로로 불러 확인). 단 값은 프로세스를 띄울 때마다 새로 뽑으므로 재시작하면 크기가 조금 달라진다(남긴 차이 J).
@@ -131,12 +132,13 @@ BENCH_CONFIG server=apiServer profile=matched read: tomcatMaxThreads=512 httpPoo
 | B | `default`에서 dataServer의 일을 하는 스레드가 HTTP는 Tomcat 최대 200, gRPC는 `Dispatchers.Default`(코어 수, 24)다 | 지시대로 `default`는 기본값을 손대지 않는다. 맞춘 비교는 `matched`로 한다 | `default`의 높은 동시 사용자 수에서 gRPC 서버 쪽 처리는 코어 수만큼만 겹친다(CPU를 쓰는 일이라 코어 수 이상은 이득이 작을 수 있다). 두 설정의 결과가 다르면 이 차이 때문일 수 있다 |
 | C | gRPC 클라이언트 채널은 두 설정 모두 1개(HTTP/2 연결 하나에 요청을 겹침), HTTP는 요청마다 연결 하나를 잡는다(HTTP/1.1) | 전송 방식의 성질이다 | `http-proto` 대 `grpc-unary`의 차이에 연결 수의 차이가 들어간다. 이것이 "전송 방식의 효과"의 일부다 |
 | D | apiServer 컨트롤러가 Tomcat 스레드에서 `runBlocking`으로 기다린다 | 바꾸면 실험이 달라진다 | 동시에 나가는 요청 수의 상한이 apiServer Tomcat 최대 스레드다(네 경로 같음). 넘는 요청의 대기는 `latencyMs`에 안 들어가고 k6의 시간에만 들어간다 |
-| E (전 7) | 기록하는 크기의 뜻이 축마다 다르다. 크기 축은 원래 페이로드 크기(JSON은 실제로 1.33배 넘게 보낸다), 복잡도 축은 보낸 바이트 수 | 크기 축의 값은 축의 이름(조건)이라 경로마다 같게 두는 것이 비교에 맞다 | 지연 측정에는 영향 없음. 전송량은 k6의 `data_received`나 별도 측정으로 얻는다 |
+| E (전 7) | 기록하는 크기의 뜻이 축마다 다르다. 크기 축은 원래 페이로드 크기(JSON은 실제로 1.33배 넘게 보낸다), 복잡도 축은 보낸 바이트 수 | 크기 축의 값은 축의 이름(조건)이라 경로마다 같게 두는 것이 비교에 맞다 | 지연 측정에는 영향 없음. 전송량은 조건과 경로마다 한 번 잰 크기 표(`results/2026-11/sizes.json`)를 쓴다 |
 | F | dataServer가 복잡도 축 JSON에 담는 `serializedSize`는 여전히 고정 추정치다 | 실제 크기를 담으려면 dataServer가 한 번 더 직렬화해야 해서(자기 크기를 담는 필드라) 보내는 쪽 일이 늘어난다. apiServer가 받은 바이트 수를 쓰므로 기록에는 영향이 없다 | 없음 (값을 쓰지 않는다) |
 | G | 잘못된 복잡도 값에 apiServer가 400이 아니라 500을 돌려준다(세 경로 같음) | 측정과 무관하다 | 없음 |
 | H | JSON 응답은 `Content-Length` 없이 chunked로 가고, Protobuf와 바이트 응답은 `Content-Length`를 먼저 정한다 | 형식과 프레임워크의 성질이다. Jackson은 스트림에 쓰면서 길이를 모르고, Protobuf는 `serializedSize`를, 바이트는 배열 길이를 미리 안다 | JSON 쪽에 청크 머리(크기 줄)가 붙고 받는 쪽이 청크를 이어 붙인다. 작은 응답에서는 무시할 만하다. JSON 경로의 비용에 들어간다 |
 | I | `default`에서는 dataServer가 HTTP 연결을 100요청마다(그리고 60초 쉬면) 끊고, gRPC는 연결을 유지한다 | `default`는 기본값을 손대지 않는다. `matched`에서는 끊지 않게 맞췄다(R4) | `default`의 HTTP 경로는 100요청마다 새 TCP 연결을 맺는 비용이 들어간다. 두 설정의 HTTP 결과가 다르면 이 차이 때문일 수 있다 |
 | J | 복잡도 축 데이터의 값은 프로세스를 띄울 때마다 새로 뽑는다(시드 고정 없음). 재시작하면 크기가 조금 달라진다(예: ultra Protobuf 21,370 → 21,342바이트) | 이번 지시 밖이라 고치지 않았다(task 01c에서 찾음) | 한 프로세스 안에서는 세 경로가 같다. 회차마다 서버를 다시 띄우면 회차 사이의 크기가 1% 안쪽으로 흔들린다. 필요하면 생성기의 난수 시드를 고정한다 |
+| K | `http-proto`(복잡도 축)만 Protobuf 두 경로 중 측정 구간 안에서 결과를 감싸는 객체 하나(`ComplexProtoResult`)를 더 만든다(`grpc-unary`는 메시지를 그대로 받는다. 복잡도 축 `http-json`도 `ComplexJsonResult`로 감싼다) | 받은 본문의 바이트 수를 메시지와 함께 돌려주려고 감싼다(R3) | 작은 객체 하나라 밀리초 단위에서 구분되지 않는다 |
 
 ## 테스트
 

@@ -9,7 +9,12 @@ usage() {
   --rounds N         반복 횟수 (기본 5)               [ROUNDS]
   --duration D       측정 한 번의 길이 (기본 30s)     [DURATION]
   --label NAME       결과 이름표 (기본 nodelay)       [LABEL]
-  --max-load X       1분 부하 평균의 상한 (기본 4.0)  [MAX_LOAD]
+  --max-load X       회차를 시작할 1분 부하 평균의 기준 (기본 4.0) [MAX_LOAD]
+  --max-wait S       부하가 기준 아래로 내려가길 기다리는 최대 초 (기본 600) [MAX_WAIT]
+                     넘으면 멈추지 않고 시작하고 conditions.json에 적는다
+  --conditions A,B   축의 조건 중 일부만 (기본 전체 — 본 측정은 전체) [ONLY_CONDITIONS]
+  --no-build         시작할 때 ./gradlew bootJar를 돌리지 않는다(있는 jar로 잰다)
+  --allow-dirty      추적 파일에 커밋하지 않은 변경이 있어도 시작한다(conditions.json에 표시)
   --warmup N         워밍업: 조건 × 경로마다 부를 횟수 (기본 200) [WARMUP]
   --warmup-vus N     워밍업의 동시 사용자 수 (기본 10) [WARMUP_VUS]
   --pause S          측정 사이에 쉬는 초 (기본 3)     [PAUSE]
@@ -20,6 +25,8 @@ EOF
 AXIS="${AXIS:-}"; CONFIG="${CONFIG:-}"
 ROUNDS="${ROUNDS:-5}"; DURATION="${DURATION:-30s}"; LABEL="${LABEL:-nodelay}"
 MAX_LOAD="${MAX_LOAD:-4.0}"; WARMUP="${WARMUP:-200}"; WARMUP_VUS="${WARMUP_VUS:-10}"; PAUSE="${PAUSE:-3}"
+MAX_WAIT="${MAX_WAIT:-600}"; ONLY_CONDITIONS="${ONLY_CONDITIONS:-}"; BUILD=1; ALLOW_DIRTY=0
+LOAD_CHECK_INTERVAL=10
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -32,6 +39,10 @@ while [ $# -gt 0 ]; do
     --warmup) WARMUP="$2"; shift 2 ;;
     --warmup-vus) WARMUP_VUS="$2"; shift 2 ;;
     --pause) PAUSE="$2"; shift 2 ;;
+    --max-wait) MAX_WAIT="$2"; shift 2 ;;
+    --conditions) ONLY_CONDITIONS="$2"; shift 2 ;;
+    --no-build) BUILD=0; shift ;;
+    --allow-dirty) ALLOW_DIRTY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "모르는 인자: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -43,6 +54,7 @@ case "$CONFIG" in default|matched) ;; *) usage >&2; die "설정은 default 또�
 [[ "$ROUNDS" =~ ^[1-9][0-9]*$ ]] || die "반복 횟수가 잘못됨: $ROUNDS"
 [[ "$WARMUP" =~ ^[0-9]+$ ]] || die "워밍업 횟수가 잘못됨: $WARMUP"
 [[ "$LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || die "이름표가 잘못됨: $LABEL"
+[[ "$MAX_WAIT" =~ ^[0-9]+$ ]] || die "최대 대기 시간이 잘못됨: $MAX_WAIT"
 
 # 축의 조건: "조건이름|PARAM|VUS" (조건의 순서는 고정)
 case "$AXIS" in
@@ -58,6 +70,18 @@ case "$AXIS" in
   *) usage >&2; die "축은 size, concurrency, complexity 중 하나" ;;
 esac
 
+# --conditions: 축의 조건 중 일부만 (순서는 축의 순서 그대로)
+if [ -n "$ONLY_CONDITIONS" ]; then
+  IFS=',' read -r -a want <<< "$ONLY_CONDITIONS"
+  for w in "${want[@]}"; do
+    printf '%s\n' "${CONDITIONS[@]}" | grep -q "^$w|" || die "이 축에 없는 조건: $w"
+  done
+  KEEP=(); for c in "${CONDITIONS[@]}"; do
+    for w in "${want[@]}"; do [ "${c%%|*}" = "$w" ] && KEEP+=("$c"); done
+  done
+  CONDITIONS=("${KEEP[@]}")
+fi
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$ROOT/scripts/remeasure"
 DATA_JAR="$ROOT/dataServer/build/libs/dataServer-0.0.1-SNAPSHOT.jar"
@@ -67,18 +91,37 @@ PORTS=(8080 8081 9091)
 
 # ---------- 실행 전 확인 ----------
 for t in java k6 curl ss python3; do command -v "$t" >/dev/null || die "$t 가 없다"; done
-[ -f "$DATA_JAR" ] && [ -f "$API_JAR" ] || die "jar가 없다 — 두 서버에서 ./gradlew bootJar"
 
 busy_ports() { local p out=""; for p in "${PORTS[@]}"; do ss -Htln "sport = :$p" | grep -q . && out+="$p "; done; echo "$out"; }
 b="$(busy_ports)"; [ -z "$b" ] || die "포트가 쓰이고 있다: $b(이 실험의 서버는 8080·8081·9091이 비어 있을 때만 띄운다)"
 
+# 추적 파일에 커밋하지 않은 변경이 있으면 시작하지 않는다(docs/plans/는 작업 기록이라 뺀다)
+DIRTY_CODE="$(git -C "$ROOT" status --porcelain --untracked-files=no -- . ':(exclude)docs/plans')"
+if [ -n "$DIRTY_CODE" ] && [ "$ALLOW_DIRTY" -ne 1 ]; then
+  die "추적 파일에 커밋하지 않은 변경이 있다(--allow-dirty로 풀 수 있다):
+$DIRTY_CODE"
+fi
+
 load1() { cut -d' ' -f1 /proc/loadavg; }
+above() { awk -v l="$1" -v m="$2" 'BEGIN{exit !(l>m)}'; }  # $1 > $2 이면 참
 L="$(load1)"
-awk -v l="$L" -v m="$MAX_LOAD" 'BEGIN{exit !(l>m)}' && die "1분 부하 평균 $L 이 기준 $MAX_LOAD 보다 높다 — 나중에 다시 돌린다"
+if above "$L" "$(awk -v m="$MAX_LOAD" 'BEGIN{print m*3}')"; then
+  echo "1분 부하 평균 $L 이 기준 $MAX_LOAD 의 3배를 넘는다 — 다른 작업이 돌고 있을 수 있다. CPU 상위 프로세스:"
+  ps -eo pid,pcpu,etime,comm --sort=-pcpu | head -8
+fi
 
 for r in $(seq 1 "$ROUNDS"); do
   [ -e "$OUT/round$r" ] && die "이미 있다: $OUT/round$r (덮어쓰지 않는다 — 다른 이름표를 쓰거나 직접 옮긴다)"
 done
+
+# 지금 커밋에서 jar를 빌드한다
+if [ "$BUILD" -eq 1 ]; then
+  for m in dataServer apiServer; do
+    echo "빌드: $m ./gradlew bootJar"
+    (cd "$ROOT/$m" && ./gradlew -q bootJar) || die "$m 빌드 실패"
+  done
+fi
+[ -f "$DATA_JAR" ] && [ -f "$API_JAR" ] || die "jar가 없다 — --no-build를 빼고 돌리거나 두 서버에서 ./gradlew bootJar"
 
 # ---------- 회차 공통 조건 ----------
 COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
@@ -90,6 +133,7 @@ CPU_MODEL="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')
 # jar가 커밋과 따로 빌드될 수 있으므로 jar 자체를 식별할 값도 남긴다
 JARS="$(for j in "$DATA_JAR" "$API_JAR"; do echo "$(basename "$j") sha256=$(sha256sum "$j" | cut -c1-16) built=$(date -Iseconds -r "$j")"; done)"
 export JARS COMMIT TRACKED_DIRTY JDK K6V CORES CPU_MODEL AXIS CONFIG DURATION WARMUP WARMUP_VUS PAUSE ROUNDS LABEL MAX_LOAD
+export MAX_WAIT LOAD_CHECK_INTERVAL BUILD ALLOW_DIRTY ONLY_CONDITIONS
 
 # ---------- 서버와 정리 ----------
 STARTED_PIDS=()
@@ -182,11 +226,33 @@ TOTAL_START=$(date +%s)
 echo "축 $AXIS · 설정 $CONFIG · ${ROUNDS}회 · 한 번 $DURATION · 결과 $OUT"
 mkdir -p "$OUT"
 
+# 1분 부하 평균이 기준 아래로 내려갈 때까지 기다린다. 최대 대기를 넘으면 그대로 시작하고 적는다.
+# 결과: $STATE/load_wait_seconds, $STATE/load_wait_exceeded (1|0)
+wait_for_load() {
+  local t0 now l
+  t0=$(date +%s)
+  while :; do
+    l="$(load1)"
+    now=$(date +%s)
+    if ! above "$l" "$MAX_LOAD"; then
+      echo $(( now - t0 )) > "$STATE/load_wait_seconds"; echo 0 > "$STATE/load_wait_exceeded"; return 0
+    fi
+    if [ $(( now - t0 )) -ge "$MAX_WAIT" ]; then
+      echo $(( now - t0 )) > "$STATE/load_wait_seconds"; echo 1 > "$STATE/load_wait_exceeded"
+      echo "  경고: ${MAX_WAIT}초를 기다려도 부하 $l 이 기준 $MAX_LOAD 보다 높다 — 그대로 시작한다(conditions.json에 적음)" >&2
+      return 0
+    fi
+    echo "  부하 $l > 기준 $MAX_LOAD — ${LOAD_CHECK_INTERVAL}초 뒤 다시 본다 ($(( now - t0 ))/${MAX_WAIT}초)"
+    sleep "$LOAD_CHECK_INTERVAL"
+  done
+}
+
 for r in $(seq 1 "$ROUNDS"); do
+  STATE="$STATE_ROOT/round$r"; mkdir -p "$STATE"
+  wait_for_load
   b="$(busy_ports)"; [ -z "$b" ] || die "회차 $r 시작 전에 포트가 쓰이고 있다: $b"
   mkdir "$OUT/round$r" || die "회차 폴더를 만들 수 없다: $OUT/round$r"
   ROUND_DIR="$OUT/round$r"
-  STATE="$STATE_ROOT/round$r"; mkdir -p "$STATE"
 
   # 회차 r의 경로 순서 = PATHS를 (r-1)만큼 돌린 것
   ORDER=(); for i in $(seq 0 $((NPATH - 1))); do ORDER+=("${PATHS[$(( (i + r - 1) % NPATH ))]}"); done
@@ -197,7 +263,7 @@ for r in $(seq 1 "$ROUNDS"); do
   load1 > "$STATE/load_before"
   cat /proc/loadavg > "$STATE/loadavg_before"
   ps -eo pid,pcpu,comm --sort=-pcpu | head -6 > "$STATE/top_before"
-  echo "회차 $r/$ROUNDS — 경로 순서: ${ORDER[*]} (부하 $(load1))"
+  echo "회차 $r/$ROUNDS — 경로 순서: ${ORDER[*]} (부하 $(cat "$STATE/load_before"), 기다린 시간 $(cat "$STATE/load_wait_seconds")초)"
 
   start_server dataServer "$DATA_JAR" "$ROUND_DIR/dataServer.log"
   DATA_PID=${STARTED_PIDS[-1]}

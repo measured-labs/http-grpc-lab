@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """다시 재기(2026-11) — run.sh가 남긴 원자료에서 표를 뽑는다. 표준 라이브러리만 쓴다.
 
-사용: python3 scripts/remeasure/summarize.py results/2026-11/<이름표>/<축>-<설정> [-o 파일.md]
+사용: python3 scripts/remeasure/summarize.py results/2026-11/<이름표>/<축>-<설정> [-o 파일.md] [--sizes sizes.json]
 
 조건마다, 경로마다: 회차별 처리량(req/s)과 그 중앙값·최솟값·최댓값, k6가 잰 지연의 중앙값과 p95
-(회차들의 중앙값), 서버가 잰 하위 호출 지연의 평균(회차들의 중앙값), 요청당 받은 바이트.
+(회차들의 중앙값), 서버가 잰 하위 호출 지연의 평균(회차들의 중앙값), 두 서버 사이의 본문 크기(sizes.sh가
+조건과 경로마다 한 번 잰 값, 기본 results/2026-11/sizes.json), k6가 요청당 받은 바이트(apiServer의 응답).
 조건마다: 회차별 1위 경로, 모든 회차에서 같은 경로가 1위였는지, 1위와 처리량 구간이 겹치는지.
 """
 import argparse
@@ -55,8 +56,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("axis_dir")
     ap.add_argument("-o", "--output")
+    ap.add_argument("--sizes", help="sizes.sh의 결과 (기본: <축 폴더>/../../sizes.json)")
     args = ap.parse_args()
     axis_dir = Path(args.axis_dir)
+    sizes_file = Path(args.sizes) if args.sizes else axis_dir.parent.parent / "sizes.json"
     rounds = load_rounds(axis_dir)
     if not rounds:
         sys.exit(f"회차 폴더가 없다: {axis_dir}")
@@ -94,6 +97,19 @@ def main():
 
     # ---- 측정 조건 요약 ----
     axis = first.get("axis", axis_dir.name)
+
+    # 두 서버 사이의 본문 크기 (조건 → 경로 → 바이트)
+    sizes, sizes_doc = {}, None
+    if sizes_file.exists():
+        sizes_doc = json.loads(sizes_file.read_text())
+        for cn, ps in sizes_doc.get("axes", {}).get(axis, {}).items():
+            for pn, e in ps.items():
+                v = e.get("bodyBytes", e.get("grpcLengthPrefixedBytes"))
+                sizes.setdefault(cn, {})[pn] = (v, pn == "grpc-unary")
+        if not sizes:
+            warn.append(f"{sizes_file}에 축 {axis}의 값이 없다 — '두 서버 사이의 본문 크기' 열을 비운다")
+    else:
+        warn.append(f"{sizes_file}이 없다 — '두 서버 사이의 본문 크기' 열을 비운다(scripts/remeasure/sizes.sh로 만든다)")
     w(f"# {axis_dir.parent.name} / {axis_dir.name}")
     w("")
     w("## 측정 조건")
@@ -126,7 +142,11 @@ def main():
     w("- 실행 순서(회차별): " + " · ".join(f"r{c['round']} {' '.join(c.get('pathOrder', []))}" for c in conds_meta))
     w("- 처리량 = k6 `http_reqs.rate`. 지연 = k6 `http_req_duration`의 중앙값과 p95(회차 값들의 중앙값). "
       "서버 하위 호출 = apiServer 응답의 `latencyMs`(dataServer 호출 구간) 평균(회차 값들의 중앙값). "
-      "받은 바이트 = k6 `data_received` ÷ 요청 수(apiServer → k6 응답, dataServer → apiServer 전송량이 아님).")
+      "두 서버 사이의 본문 크기 = dataServer → apiServer 응답 본문의 바이트 수(`sizes.json`, 조건과 경로마다 한 번 잰 값 — "
+      "HTTP 머리·청크 머리 제외). `grpc-unary`는 재지 않고 `http-proto`와 같은 Protobuf 메시지 + gRPC 메시지 머리 5바이트로 적었다(HTTP/2 프레임 제외, † 표시). "
+      "k6가 받은 바이트 = k6 `data_received` ÷ 요청 수(apiServer → k6의 작은 JSON 응답, 머리 포함).")
+    if sizes_doc:
+        w(f"- 본문 크기 표: `{sizes_file}` (커밋 {sizes_doc.get('commit', '?')[:7]}, {sizes_doc.get('measuredAt', '?')})")
     w("- ⚠ 표시 = 실패로 판정된 측정(k6 종료 코드 ≠ 0, 요청 실패율 ≠ 0, check 실패). 값은 그대로 표에 넣었다.")
     w("")
 
@@ -171,7 +191,8 @@ def main():
         w(f"### {cn}")
         w("")
         head = ["경로"] + [f"r{r} req/s" for r in round_ids] + \
-               ["중앙값", "최소", "최대", "1위와 구간", "지연 중앙값 ms", "지연 p95 ms", "서버 하위 호출 평균 ms", "받은 바이트/요청"]
+               ["중앙값", "최소", "최대", "1위와 구간", "지연 중앙값 ms", "지연 p95 ms", "서버 하위 호출 평균 ms",
+                "두 서버 사이의 본문 크기", "k6가 받은 바이트(apiServer의 응답)/요청"]
         w("| " + " | ".join(head) + " |")
         w("|" + "|".join(["------"] * len(head)) + "|")
         for pn in [p for p in paths if p in stats]:
@@ -188,9 +209,11 @@ def main():
             else:
                 t = stats[top]
                 ov = "겹침" if s["max"] >= t["min"] and t["max"] >= s["min"] else "안 겹침"
+            sz = sizes.get(cn, {}).get(pn)
+            sz_cell = "" if sz is None else fmt(sz[0]) + (" †" if sz[1] else "")
             w("| " + " | ".join([f"`{pn}`"] + cells + [fmt(s["med"]), fmt(s["min"]), fmt(s["max"]), ov,
                                                           fmt(s["lat_med"], 3), fmt(s["lat_p95"], 3),
-                                                          fmt(s["srv"], 3), fmt(s["bpr"], 1)]) + " |")
+                                                          fmt(s["srv"], 3), sz_cell, fmt(s["bpr"], 1)]) + " |")
         w("")
         w("- 회차별 1위: " + ", ".join(f"r{r} `{p}`" for r, p in winners.items())
           + f" → **{'모든 회차에서 같음' if same else '회차마다 갈림'}**")
