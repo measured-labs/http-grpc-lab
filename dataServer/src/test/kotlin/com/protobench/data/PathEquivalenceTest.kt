@@ -73,6 +73,11 @@ class PathEquivalenceTest {
         assertEquals(grpc.payload, proto.payload)
         assertEquals(grpc.toBuilder().clearTimestamp().build(), proto.toBuilder().clearTimestamp().build())
 
+        // http-proto는 응답 스트림에 바로 직렬화하되 Content-Length를 정해 보낸다
+        val protoResponse = mockMvc.get("/data/proto?requestId=$requestId&size=$size").andReturn().response
+        assertEquals(proto.serializedSize, protoResponse.contentLength)
+        assertEquals("application/x-protobuf", protoResponse.contentType)
+
         // http-bytes, http-json: 같은 바이트
         assertArrayEquals(grpc.payload.toByteArray(), bytes)
         assertArrayEquals(grpc.payload.toByteArray(), jsonPayload)

@@ -1,6 +1,8 @@
 package com.protobench.data.controller
 
+import com.google.protobuf.Message
 import com.protobench.data.service.*
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -88,18 +90,19 @@ class DataController(
      * Protobuf 형식으로 페이로드 반환 (http-proto 경로)
      *
      * gRPC 단건(GetData)과 같은 DataResponse 메시지를 HTTP/1.1로 보낸다.
+     * gRPC가 메시지를 전송 버퍼에 바로 직렬화하는 것과 같게, 중간 `byte[]`를 만들지 않고
+     * 응답 스트림에 바로 직렬화한다([writeProto]).
      *
      * @param requestId 요청 ID
      * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
-     * @return Protobuf로 직렬화한 DataResponse
      */
     @GetMapping("/proto", produces = [PROTOBUF_MEDIA_TYPE])
     fun getDataAsProto(
         @RequestParam(defaultValue = "unknown") requestId: String,
-        @RequestParam(defaultValue = "1mb") size: String
-    ): ResponseEntity<ByteArray> {
-        val response = dataService.buildDataResponseProto(requestId, size)
-        return ResponseEntity.ok(response.toByteArray())
+        @RequestParam(defaultValue = "1mb") size: String,
+        servletResponse: HttpServletResponse
+    ) {
+        writeProto(servletResponse, dataService.buildDataResponseProto(requestId, size), PROTOBUF_MEDIA_TYPE)
     }
 
     /**
@@ -207,26 +210,40 @@ class DataController(
      * 복잡한 데이터를 Protobuf Binary 형식으로 반환
      *
      * 메시지는 gRPC 단건(`GetComplexData`)과 같은 [ComplexDataProtoBuilder]로 만든다.
+     * 크기 축의 `/data/proto`와 같이 응답 스트림에 바로 직렬화한다([writeProto]).
      *
      * @param requestId 요청 ID
-     * @param complexity 복잡도 (simple, medium, complex, ultra, extreme)
-     * @return Protobuf 바이너리 바이트 배열, 복잡도 값이 잘못되면 400
+     * @param complexity 복잡도 (simple, medium, complex, ultra, extreme). 잘못되면 400.
      */
     @GetMapping("/complex/binary", produces = [MediaType.APPLICATION_OCTET_STREAM_VALUE])
     fun getComplexDataAsBinary(
         @RequestParam(defaultValue = "unknown") requestId: String,
-        @RequestParam(defaultValue = "simple") complexity: String
-    ): ResponseEntity<ByteArray> {
+        @RequestParam(defaultValue = "simple") complexity: String,
+        servletResponse: HttpServletResponse
+    ) {
         val response = complexDataProtoBuilder.build(requestId, complexity)
-            ?: return ResponseEntity.badRequest().build()
-        val responseBytes = response.toByteArray()
+        if (response == null) {
+            servletResponse.status = HttpServletResponse.SC_BAD_REQUEST
+            return
+        }
+        servletResponse.setHeader("X-Request-Id", requestId)
+        servletResponse.setHeader("X-Complexity", complexity)
+        servletResponse.setHeader("X-Payload-Size", response.serializedSize.toString())
+        servletResponse.setHeader("X-Timestamp", response.timestamp.toString())
+        writeProto(servletResponse, response, MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    }
 
-        return ResponseEntity.ok()
-            .header("X-Request-Id", requestId)
-            .header("X-Complexity", complexity)
-            .header("X-Payload-Size", responseBytes.size.toString())
-            .header("X-Timestamp", response.timestamp.toString())
-            .body(responseBytes)
+    /**
+     * Protobuf 메시지를 응답 스트림에 바로 직렬화한다.
+     *
+     * 보내는 쪽 복사: 메시지 안의 값 → (직렬화) → Tomcat 응답 스트림. gRPC 서버가 메시지를
+     * Netty 버퍼에 바로 직렬화하는 것과 같은 횟수다. Content-Length를 먼저 정해 chunked로 보내지 않는다.
+     */
+    private fun writeProto(servletResponse: HttpServletResponse, message: Message, contentType: String) {
+        servletResponse.status = HttpServletResponse.SC_OK
+        servletResponse.contentType = contentType
+        servletResponse.setContentLength(message.serializedSize)
+        message.writeTo(servletResponse.outputStream)
     }
 
     /**
