@@ -46,7 +46,7 @@ def main():
     if tcp:
         tcp = [round(x, 3) for x in tcp]
         doc["tcpConnect"] = {"what": "curl time_connect − time_namelookup (dataServer:8081, SYN → SYN-ACK)",
-                             "samples": len(tcp), "minMs": min(tcp), "medianMs": statistics.median(tcp),
+                             "samples": len(tcp), "minMs": min(tcp), "medianMs": round(statistics.median(tcp), 3),
                              "maxMs": max(tcp), "valuesMs": tcp}
         if min(tcp) < expected - 0.05:
             reasons.append(f"TCP 연결 최솟값 {min(tcp)}ms < 기대 {expected}ms")

@@ -159,8 +159,9 @@ if [ "$CONTAINER" -eq 1 ]; then
   BASE_IMAGE="eclipse-temurin:21-jre $(docker image inspect eclipse-temurin:21-jre --format '{{index .RepoDigests 0}} {{.Id}}' 2>/dev/null)"
   DOCKER_VERSION="$(docker version --format 'server {{.Server.Version}} client {{.Client.Version}}')"
   COMPOSE_VERSION="$(docker compose version --short)"
-  CONTAINER_JDK="$(dc run --rm --no-deps -T --entrypoint java dataServer -version 2>&1 | head -1)"
+  CONTAINER_JDK="$(dc run --rm --no-deps -T --entrypoint java dataServer -version 2>&1 | grep -m1 ' version ')"
   [ -n "$CONTAINER_JDK" ] || die "이미지의 java 버전을 읽지 못했다"
+  dc down >/dev/null 2>&1  # 위의 run이 만든 네트워크를 회차 밖에 남기지 않는다
   export IMAGE_TAG IMAGE_ID BASE_IMAGE DOCKER_VERSION COMPOSE_VERSION CONTAINER_JDK
 fi
 
