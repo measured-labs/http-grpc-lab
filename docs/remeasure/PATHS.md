@@ -143,9 +143,10 @@ BENCH_CONFIG server=apiServer profile=matched read: tomcatMaxThreads=512 httpPoo
 
 ## 테스트
 
-`./gradlew test` — dataServer 27건, apiServer 30건(task 01c 기준).
+`./gradlew test` — dataServer 40건, apiServer 30건(커밋 `f416adc` 기준. 2026-11-21 19:27에 돈 `build/test-results/test/*.xml`의 `tests` 합, 실패 0).
 
 - `dataServer/src/test/kotlin/com/protobench/data/PathEquivalenceTest.kt` (23건): 같은 요청에 `/data/json`(Base64를 되돌려), `/data/binary`, `/data/proto`가 gRPC `GetData`와 같은 바이트·크기를 돌려준다(7개 크기, `/data/proto`의 `Content-Length`와 형식 포함). `/data/complex/binary`가 gRPC `GetComplexData`와 같은 형태를 가진다(5개 복잡도). 두 경로의 메시지가 같다(5개). **세 경로(`/data/complex/json`, `/data/complex/binary`, `GetComplexData`)가 필드 값까지 같은 데이터를 보낸다 — JSON의 `data`를 DTO로 풀어 같은 빌더로 만든 메시지가 HTTP + Protobuf 메시지와 같다(5개, task 01c). 시작 때 만든 데이터 대신 요청마다 새로 만들게 바꾸면 이 테스트가 실패하는 것을 확인했다.** 잘못된 복잡도 값을 세 경로가 거절한다.
+- `dataServer/src/test/kotlin/com/protobench/data/DataSeedTest.kt` (12건, 커밋 `4c2650a`): 서비스를 두 번 만들어도(= 서버를 다시 띄워도) 크기 축의 바이트(7개 크기)와 복잡도 축의 데이터·Protobuf 바이트(5개 복잡도)가 같다.
 - `dataServer/src/test/kotlin/com/protobench/data/BenchConcurrencyConfigTest.kt` (5건): `matched`에서 Tomcat 최대 스레드와 서비스 코루틴의 고정 풀이 설정값이고, 그 디스패처의 코루틴이 `grpc-bench-*` 스레드에서 돌며, 실제 gRPC 호출이 그 풀을 거친다. `matched`에서도 gRPC 서버 실행기는 grpc-java 기본값이다(실행 중인 서버의 실행기 풀이 `SharedResourcePool` — `builder.executor(...)`를 다시 넣으면 실패하는 것을 확인했다). `matched`에서 연결 유지 값이 -1이고 연결 하나로 150요청을 보내도 끊지 않는다. `default`에서 기본값(200, grpc 기본 실행기·디스패처)이 그대로이고 100번째 요청에서 끊는다.
 - `apiServer/src/test/kotlin/com/protobench/api/PathEquivalenceTest.kt` (26건): 가짜 dataServer에 대해 `http-proto`와 gRPC 클라이언트가 같은 메시지 객체를 내놓는다(크기 3개, 복잡도 5개). `http-json`이 되돌린 바이트가 원래 바이트와 같다(크기 3개). 복잡도 축 `http-json`이 타입이 있는 DTO로 풀고, 그 객체를 다시 JSON 트리로 바꾸면 보낸 것과 같다(5개). 기록된 크기가 받은 본문의 바이트 수와 같다(`http-json` 5개, **`http-proto` 5개 — 같은 테스트에서 `grpc-unary`는 -1**). 가짜 dataServer의 JSON은 실제 dataServer의 응답에서 배열을 2개, 큰 맵을 3개 항목까지 줄인 것이다(`src/test/resources/complex-json/`).
 - `apiServer/src/test/kotlin/com/protobench/api/HttpConnectionPoolTest.kt` (2건, task 01c): 가짜 서버가 맺어진 TCP 연결 수를 센다. `matched`(풀 2)에 동시 3요청 → 연결 2개, `default` → 3개. 두 설정 모두 요청에 `Accept-Encoding: gzip`이 붙는다. `matched`를 기본 커넥터로 바꾸면 연결이 3개가 되어 실패하고, `matched`에서 `compress(true)`를 빼면 실패하는 것을 확인했다.
