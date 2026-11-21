@@ -113,14 +113,18 @@ if [ "$CONTAINER" -eq 1 ]; then
 fi
 # 이 프로젝트(rm-http-grpc)의 compose만 다룬다. 시간 제한을 건다.
 export DELAY_MS="$DELAY"
-dc() { timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"; }
+# stdin을 읽지 않게 한다(터미널에서 백그라운드로 돌 때 멈추지 않게)
+dc() { timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@" </dev/null; }
+leftover_containers() { docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --format '{{.Names}} ({{.Status}})' </dev/null; }
 if [ "$CONTAINER" -eq 1 ]; then
   left="$(docker ps -a -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT")"
   [ -z "$left" ] || die "이전 실행의 $COMPOSE_PROJECT 컨테이너가 남아 있다 — 확인 뒤 DELAY_MS=0 docker compose -f docker-compose.remeasure.yml down"
 fi
 
 busy_ports() { local p out=""; for p in "${PORTS[@]}"; do ss -Htln "sport = :$p" | grep -q . && out+="$p "; done; echo "$out"; }
-b="$(busy_ports)"; [ -z "$b" ] || die "포트가 쓰이고 있다: $b(이 실험의 서버는 8080·8081·9091이 비어 있을 때만 띄운다)"
+if [ "$CONTAINER" -eq 1 ]; then PORT_NOTE="컨테이너 실행은 apiServer의 8080만 호스트에 열므로 8080만 본다"
+else PORT_NOTE="호스트 직접 실행은 8080·8081·9091이 비어 있을 때만 띄운다"; fi
+b="$(busy_ports)"; [ -z "$b" ] || die "포트가 쓰이고 있다: $b($PORT_NOTE)"
 
 # 추적 파일에 커밋하지 않은 변경이 있으면 시작하지 않는다(docs/plans/는 작업 기록이라 뺀다)
 DIRTY_CODE="$(git -C "$ROOT" status --porcelain --untracked-files=no -- . ':(exclude)docs/plans')"
@@ -161,7 +165,8 @@ if [ "$CONTAINER" -eq 1 ]; then
   COMPOSE_VERSION="$(docker compose version --short)"
   CONTAINER_JDK="$(dc run --rm --no-deps -T --entrypoint java dataServer -version 2>&1 | grep -m1 ' version ')"
   [ -n "$CONTAINER_JDK" ] || die "이미지의 java 버전을 읽지 못했다"
-  dc down >/dev/null 2>&1  # 위의 run이 만든 네트워크를 회차 밖에 남기지 않는다
+  # 위의 run이 만든 네트워크를 회차 밖에 남기지 않는다
+  dc down >/dev/null 2>&1 || die "docker compose down 실패 — 남은 컨테이너: $(leftover_containers)"
   export IMAGE_TAG IMAGE_ID BASE_IMAGE DOCKER_VERSION COMPOSE_VERSION CONTAINER_JDK
 fi
 
@@ -190,7 +195,11 @@ stop_servers() {
   if [ "$CONTAINER" -eq 1 ]; then
     [ "$COMPOSE_UP" -eq 1 ] || return 0
     save_container_logs
-    dc down --timeout 15 >/dev/null 2>&1 || echo "경고: docker compose down 실패 — docker ps로 $COMPOSE_PROJECT 컨테이너를 확인한다" >&2
+    if ! dc down --timeout 15 >/dev/null 2>&1; then
+      echo "오류: docker compose down 실패 — 남은 $COMPOSE_PROJECT 컨테이너:" >&2
+      leftover_containers >&2
+      return 1  # COMPOSE_UP=1을 두어 나갈 때 한 번 더 내린다
+    fi
     COMPOSE_UP=0
     return 0
   fi
@@ -204,12 +213,13 @@ stop_servers() {
   for pid in "${STARTED_PIDS[@]}"; do kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null; done
   for pid in "${STARTED_PIDS[@]}"; do wait "$pid" 2>/dev/null; done
   STARTED_PIDS=()
+  return 0
 }
 
 STATE_ROOT="$(mktemp -d)"
 STATE=""
 
-write_conditions() {  # $1 = 상태 (running | complete | interrupted | failed-start)
+write_conditions() {  # $1 = 상태 (running | complete | interrupted | failed-start | failed-rtt-check | failed-teardown)
   [ -n "$ROUND_DIR" ] && [ -d "$ROUND_DIR" ] || return 0
   ROUND_STATUS="$1" python3 "$HERE/conditions.py" "$STATE" "$ROUND_DIR" || echo "경고: conditions.json을 쓰지 못함" >&2
 }
@@ -224,7 +234,7 @@ on_exit() {
   fi
   if [ "$COMPOSE_UP" -eq 1 ]; then
     echo "정리: $COMPOSE_PROJECT 컨테이너를 내린다" >&2
-    stop_servers
+    stop_servers || { [ "$rc" -ne 0 ] || rc=1; }
   fi
   # 회차가 끝나지 않은 채 나가면 그 회차를 interrupted로 적는다(지우지 않는다)
   if [ -n "$ROUND_DIR" ] && [ -d "$ROUND_DIR" ] && [ ! -e "$STATE/final" ]; then
@@ -274,9 +284,9 @@ save_container_logs() {
 container_up() {  # $1=서비스. 설정은 호스트 방식(start_server)과 같은 환경 변수로 넘긴다
   COMPOSE_UP=1
   if [ "$CONFIG" = matched ]; then
-    env SPRING_PROFILES_ACTIVE=matched timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --no-build --no-deps "$1" >/dev/null 2>&1
+    env SPRING_PROFILES_ACTIVE=matched timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --no-build --no-deps "$1" </dev/null >/dev/null 2>&1
   else
-    env -u SPRING_PROFILES_ACTIVE -u BENCH_MAX_CONCURRENCY timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --no-build --no-deps "$1" >/dev/null 2>&1
+    env -u SPRING_PROFILES_ACTIVE -u BENCH_MAX_CONCURRENCY timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --no-build --no-deps "$1" </dev/null >/dev/null 2>&1
   fi || { echo "docker compose up $1 실패" >&2; return 1; }
   echo "  $1 컨테이너 시작 ($(dc ps -q "$1" | cut -c1-12), 지연 ${DELAY}ms)"
 }
@@ -293,14 +303,18 @@ container_wait_ready() {  # $1=서비스 $2=확인 명령
   echo "60초 안에 뜨지 않았다 — $ROUND_DIR/$svc.log" >&2; return 1
 }
 data_ready_c() { dc exec -T dataServer sh -c 'curl -sf -o /dev/null http://localhost:8081/actuator/health && ss -Htln "sport = :9091" | grep -q .' 2>/dev/null; }
-# 측정 전에 apiServer → dataServer 왕복 시간을 재 기대값(바탕 + 지연)과 맞는지 본다. 결과: $STATE/rtt_check.json
+# 측정 전에 qdisc와 apiServer → dataServer 왕복 시간을 재 기대값(바탕 + 지연)과 맞는지 본다. 결과: $STATE/rtt_check.json
+# 표본 수(ping 20, TCP 10)는 rtt_check.py의 PING_N, TCP_N과 같아야 한다. stderr는 값 파일에 섞지 않는다(*.err).
 container_rtt_check() {
-  dc exec -T dataServer tc qdisc show dev eth0 > "$STATE/qdisc" 2>&1
-  dc exec -T apiServer ping -c 20 -i 0.2 dataServer > "$STATE/ping.txt" 2>&1
-  dc exec -T apiServer sh -c 'for i in $(seq 1 10); do curl -s -o /dev/null -w "%{time_namelookup} %{time_connect}\n" http://dataServer:8081/actuator/health; sleep 0.1; done' \
-    > "$STATE/tcp_connect.txt" 2>&1
-  python3 "$HERE/rtt_check.py" "$DELAY" "$STATE/ping.txt" "$STATE/tcp_connect.txt" "$STATE/rtt_check.json"
+  local rq rp rt
+  dc exec -T dataServer tc qdisc show dev eth0 > "$STATE/qdisc" 2> "$STATE/qdisc.err"; rq=$?
+  dc exec -T apiServer ping -c 20 -i 0.2 dataServer > "$STATE/ping.txt" 2> "$STATE/ping.err"; rp=$?
+  dc exec -T apiServer sh -c 'for i in $(seq 1 10); do curl -sf -o /dev/null -w "%{time_namelookup} %{time_connect}\n" http://dataServer:8081/actuator/health || exit 1; sleep 0.1; done' \
+    > "$STATE/tcp_connect.txt" 2> "$STATE/tcp_connect.err"; rt=$?
+  python3 "$HERE/rtt_check.py" "$DELAY" "$STATE/ping.txt" "$STATE/tcp_connect.txt" "$STATE/rtt_check.json" \
+    "$STATE/qdisc" "$rq" "$rp" "$rt"
 }
+
 
 run_k6() {  # $1=요약 JSON $2=k6 출력 로그, 나머지 = -e 인자들. 종료 코드를 돌려준다
   local summary="$1" log="$2"; shift 2
@@ -413,10 +427,14 @@ for r in $(seq 1 "$ROUNDS"); do
     done
   done
 
-  stop_servers
+  TEARDOWN_OK=1; stop_servers || TEARDOWN_OK=0
   date -Iseconds > "$STATE/ended_at"
   load1 > "$STATE/load_after"
   cat /proc/loadavg > "$STATE/loadavg_after"
+  if [ "$TEARDOWN_OK" -ne 1 ]; then
+    write_conditions failed-teardown; touch "$STATE/final"
+    die "회차 $r: 서버를 내리지 못했다 — $ROUND_DIR/conditions.json (status=failed-teardown)"
+  fi
   write_conditions complete
   touch "$STATE/final"
   ROUND_DIR=""
