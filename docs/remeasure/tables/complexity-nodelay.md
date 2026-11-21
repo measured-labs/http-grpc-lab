@@ -35,6 +35,16 @@ BENCH_CONFIG server=apiServer profile=default read: tomcatMaxThreads=200 httpPoo
 | ultra | 2,093 [1,922~2,155] | 3,061 [2,776~3,124] | 3,149 [2,369~3,218] | `grpc-unary` 4, `http-proto` 1 | 아니오 |
 | extreme | 343 [299~345] | 828 [756~845] | 806 [762~889] | `grpc-unary` 3, `http-proto` 2 | 아니오 |
 
+## 요약 — 경로끼리 견줌: 처리량 중앙값의 비율 %(회차마다 같은 경로가 앞섰는지)
+
+| 조건 | 직렬화: `http-proto` ÷ `http-json` − 1 | 전송 방식: `grpc-unary` ÷ `http-proto` − 1 |
+|------|------|------|
+| simple | +20.3% (앞선 회차 3/5) | -8.5% (앞선 회차 2/5) |
+| medium | +14.0% (앞선 회차 5/5) | +2.9% (앞선 회차 4/5) |
+| complex | +10.0% (앞선 회차 5/5) | +5.4% (앞선 회차 3/5) |
+| ultra | +46.3% (앞선 회차 5/5) | +2.9% (앞선 회차 4/5) |
+| extreme | +141.3% (앞선 회차 5/5) | -2.7% (앞선 회차 3/5) |
+
 ## 결과
 
 ### simple
