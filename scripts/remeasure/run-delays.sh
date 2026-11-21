@@ -75,7 +75,8 @@ EOF
 }
 
 # Ctrl-C는 지금 도는 run.sh가 받아 정리한다. 여기서는 멈추고 순서 파일에 남긴다.
-trap 'echo "신호를 받았다 — 지금 실행이 정리되면 멈춘다" >&2' INT TERM
+STOP=0
+trap 'STOP=1; echo "신호를 받았다 — 지금 실행이 정리되면 멈춘다" >&2' INT TERM
 write_order running
 NDELAY=${#DELAYS[@]}
 first=1
@@ -97,6 +98,10 @@ for r in $(seq 1 "$ROUNDS"); do
     if [ "$rc" -ne 0 ]; then
       write_order failed
       die "회차 $r 지연 ${d}ms 실행이 종료 코드 $rc로 끝났다 — 여기서 멈춘다(원자료는 남긴다). 순서: $ORDER_FILE"
+    fi
+    if [ "$STOP" -eq 1 ]; then
+      write_order interrupted
+      die "신호를 받아 회차 $r 지연 ${d}ms 뒤에 멈춘다(원자료는 남긴다). 순서: $ORDER_FILE"
     fi
     write_order running
   done

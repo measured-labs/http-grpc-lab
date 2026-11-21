@@ -175,10 +175,13 @@ if [ "$CONTAINER" -eq 1 ]; then
   BASE_IMAGE="eclipse-temurin:21-jre $(docker image inspect eclipse-temurin:21-jre --format '{{index .RepoDigests 0}} {{.Id}}' 2>/dev/null)"
   DOCKER_VERSION="$(docker version --format 'server {{.Server.Version}} client {{.Client.Version}}')"
   COMPOSE_VERSION="$(docker compose version --short)"
+  # 아래 run이 네트워크와 컨테이너를 만든다. 도중에 끊겨도 남지 않게 내리고 나간다(회차의 정리 함수는 아직 없다).
+  trap 'echo "신호를 받아 멈춘다 — $COMPOSE_PROJECT를 내린다" >&2; dc down >/dev/null 2>&1; exit 130' INT TERM
   CONTAINER_JDK="$(dc run --rm --no-deps -T --entrypoint java dataServer -version 2>&1 | grep -m1 ' version ')"
   [ -n "$CONTAINER_JDK" ] || die "이미지의 java 버전을 읽지 못했다"
   # 위의 run이 만든 네트워크를 회차 밖에 남기지 않는다
   dc down >/dev/null 2>&1 || die "docker compose down 실패 — 남은 컨테이너: $(leftover_containers)"
+  trap - INT TERM
   export IMAGE_TAG IMAGE_ID BASE_IMAGE DOCKER_VERSION COMPOSE_VERSION CONTAINER_JDK
 fi
 
