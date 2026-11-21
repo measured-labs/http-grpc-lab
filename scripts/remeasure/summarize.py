@@ -274,6 +274,32 @@ def main():
         same = len(cnt) == 1 and len(wn) == len(rounds)
         w(f"| {cn} | " + " | ".join(cells) + f" | {cnt_s} | {'예' if same else '아니오'} |")
     w("")
+    # 경로끼리 견줌: 직렬화(http-json → http-proto, 둘 다 HTTP/1.1), 전송 방식(http-proto → grpc-unary, 같은 Protobuf 메시지),
+    # 메시지로 감싸는 비용(http-bytes → http-proto, 크기 축만)
+    pairs = [("http-proto", "http-json", "직렬화: `http-proto` ÷ `http-json` − 1"),
+             ("grpc-unary", "http-proto", "전송 방식: `grpc-unary` ÷ `http-proto` − 1"),
+             ("http-proto", "http-bytes", "메시지로 감쌈: `http-proto` ÷ `http-bytes` − 1")]
+    pairs = [x for x in pairs if x[0] in paths and x[1] in paths]
+    if pairs:
+        w("## 요약 — 경로끼리 견줌: 처리량 중앙값의 비율 %(회차마다 같은 경로가 앞섰는지)")
+        w("")
+        w("| 조건 | " + " | ".join(x[2] for x in pairs) + " |")
+        w("|" + "|".join(["------"] * (len(pairs) + 1)) + "|")
+        for cn in cond_names:
+            data = table.get(cn)
+            if not data:
+                continue
+            cells = []
+            for a, b, _ in pairs:
+                if a in data and b in data:
+                    ratio = stats_of(data[a])["med"] / stats_of(data[b])["med"] - 1
+                    common = sorted(set(data[a]) & set(data[b]))
+                    ahead = sum(1 for r in common if data[a][r]["rps"] > data[b][r]["rps"])
+                    cells.append(f"{ratio * 100:+.1f}% (앞선 회차 {ahead}/{len(common)})")
+                else:
+                    cells.append("해당 없음")
+            w(f"| {cn} | " + " | ".join(cells) + " |")
+        w("")
     if base is not None:
         w(f"## 요약 — 견준 폴더 대비 처리량 중앙값의 변화 %(= 이 폴더 ÷ 견준 폴더 − 1)")
         w("")
