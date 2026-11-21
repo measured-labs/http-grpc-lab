@@ -42,7 +42,8 @@ scripts/remeasure/run.sh --axis complexity --config default --label nodelay --ma
 | `--config` | (필수) | `default` 또는 `matched` |
 | `--rounds` | 5 | 반복 횟수 |
 | `--duration` | 30s | 측정 한 번의 길이 |
-| `--label` | nodelay | 결과 이름표 |
+| `--label` | nodelay (`--delay X`면 `delayXms`) | 결과 이름표 |
+| `--delay` | (없음 — 호스트 직접) | `0`, `1`, `10`: 두 서버를 컨테이너로 띄우고 dataServer에서 나가는 쪽에 그만큼 지연(아래 "지연 조건") |
 | `--max-load` | 4.0 | 회차를 시작할 1분 부하 평균의 기준 — 넘으면 내려가길 기다린다 |
 | `--max-wait` | 600 | 부하를 기다리는 최대 초. 넘으면 그대로 시작하고 기록한다 |
 | `--conditions` | (전체) | 축의 조건 중 일부만, 쉼표로(예: `1kb,1mb`). 짧은 확인용 — 본 측정은 전체 |
@@ -54,9 +55,36 @@ scripts/remeasure/run.sh --axis complexity --config default --label nodelay --ma
 회차마다: 부하가 기준 아래로 내려가길 기다림 → 두 서버를 새로 띄움 → 워밍업 → 조건 순서대로, 경로는 회차 r에서 r−1만큼 돌린 순서로 k6 실행 → 서버를 끔.
 Ctrl-C나 오류로 멈춰도 스크립트가 띄운 서버만 끄고, 그 회차를 `status: interrupted`로 적는다.
 
+## 지연 조건 — `--delay 0|1|10`
+
+```bash
+scripts/remeasure/run.sh --axis size --config default --delay 10    # 이름표 delay10ms
+scripts/remeasure/run.sh --axis size --config default --delay 0     # 컨테이너 기준 조건(지연 0) — delay0ms
+```
+
+`--delay`를 주면 jar를 호스트에서 직접 띄우는 대신 `docker-compose.remeasure.yml`(compose 프로젝트 `rm-http-grpc`)로
+두 서버를 컨테이너로 띄우고 내린다. 회차, 경로 순서 돌리기, 워밍업, 부하 대기, 원자료는 위와 같다. 구성이 호스트 직접 실행과
+무엇이 다른지는 `docs/remeasure/PATHS.md` "지연 조건의 구성".
+
+- 지연: dataServer 컨테이너의 `eth0`에 `tc qdisc replace dev eth0 root netem delay Xms limit 100000`.
+  **dataServer에서 나가는 쪽(dataServer → apiServer)에만 X ms — 왕복이 X ms 늘어난다.** apiServer → dataServer 방향과 k6 → apiServer 구간에는 걸리지 않는다.
+  지연 0도 `netem delay 0ms`를 같은 자리에 건다(지연만 다르고 큐 구성은 같게).
+- 이미지: `scripts/remeasure/container/Dockerfile`(`eclipse-temurin:21-jre` + `iproute2`, `iputils-ping`) → `rm-http-grpc/jre21-nettools:1`.
+  jar는 이미지에 넣지 않고 호스트에서 빌드한 jar(`./gradlew bootJar`, 위와 같음)를 읽기 전용으로 붙인다. 첫 빌드에는 apt 내려받기가 필요하다.
+- 회차마다 두 서버를 띄운 뒤, 측정 전에 apiServer 컨테이너에서 dataServer로 `ping` 20번과 TCP 연결 10번(curl `time_connect − time_namelookup`)을 재
+  `scripts/remeasure/rtt_check.py`로 판정한다: ping 최솟값 ≥ X − 0.05ms, ping 중앙값 ≤ X + (1.0 + 0.1·X)ms, TCP 연결 최솟값 ≥ X − 0.05ms.
+  맞지 않으면 그 회차를 `status: failed-rtt-check`로 적고 멈춘다.
+- 호스트에서는 8080만 비어 있으면 된다(dataServer 포트는 열지 않는다). 이전 실행의 `rm-http-grpc` 컨테이너가 남아 있으면 시작하지 않는다.
+- Ctrl-C나 오류로 멈추면 `docker compose -p rm-http-grpc down`으로 이 프로젝트의 컨테이너와 네트워크만 내린다(이미지는 남긴다).
+  스크립트가 정리하지 못하고 죽어도 컨테이너는 `RM_MAX_LIFETIME_S`(기본 10800초)가 지나면 서버를 끄고 멈춘다.
+  직접 내릴 때: `DELAY_MS=0 docker compose -f docker-compose.remeasure.yml down`.
+- `conditions.json`에 더해지는 것: `execution`(`host-jar` | `docker-compose`), `container` — 지연 값과 그 뜻, 실제 qdisc, 왕복 확인(`rttCheck`: ping·TCP 값, 판정),
+  이미지와 바탕 이미지, 이미지의 JDK, Docker·compose 버전. `jdk`는 이미지의 JDK다(호스트 JDK와 다를 수 있다).
+- 서버 로그(`dataServer.log`, `apiServer.log`)는 `docker compose logs`에서 받아 같은 자리에 둔다. dataServer 로그 첫 줄의 `NETEM`이 컨테이너가 건 qdisc다.
+
 ## 결과
 
-`results/2026-11/<이름표>/<축>-<설정>/round<r>/`
+`results/2026-11/<이름표>/<축>-<설정>/round<r>/` (지연 조건의 이름표 기본값: `delay0ms`, `delay1ms`, `delay10ms`)
 
 - `<조건>__<경로>.json` — k6 `--summary-export`. `<조건>__<경로>.k6.txt` — k6 출력
 - `conditions.json` — 커밋, 작업 트리(`allowDirty`, `jarsBuiltAtStart`), JDK, k6, 코어 수, `BENCH_CONFIG` 두 줄, 실행 순서, 시각, 전후 부하 평균, 부하 대기(`loadWait`), 워밍업, 측정마다 실패 판정(`failed`, `failReasons`)
