@@ -159,6 +159,8 @@ BENCH_CONFIG server=apiServer profile=matched read: tomcatMaxThreads=512 httpPoo
 ## 지연 조건의 구성 (task RM-04)
 
 apiServer와 dataServer 사이에 네트워크 지연이 있는 조건은 두 서버를 컨테이너로 띄워 잰다(`run.sh --delay 0|1|10`, `docker-compose.remeasure.yml`, 쓰는 법은 `scripts/remeasure/README.md`).
+본 측정은 `run-delays.sh`로 세 지연을 회차마다 번갈아 잰다(회차 r마다 지연 0·1·10을 한 번씩, 순서는 회차마다 돌림 — 1회차 0→1→10, 2회차 1→10→0, …).
+지연을 하나씩 통째로 차례로 돌리면 몇 시간에 걸친 머신 부하의 변화가 지연의 효과에 섞인다. 실행 순서와 시각은 `results/2026-11/delay-run-order-<축>-<설정>.json`.
 호스트에서는 `tc`를 쓸 권한이 없어서, 지연을 컨테이너의 네트워크 이름공간 안에서 건다.
 
 **지연의 뜻**: dataServer 컨테이너의 `eth0`에 `tc qdisc replace dev eth0 root netem delay Xms limit 100000`. netem은 인터페이스에서 **나가는** 패킷만 늦춘다.
@@ -171,7 +173,8 @@ k6 → apiServer 구간에는 걸리지 않는다.
   다른 점: 한쪽 지연에서는 apiServer가 보내는 ACK가 늦지 않고 dataServer의 데이터만 늦다. 왕복이 같으면 보내는 쪽(dataServer)이 보는 ACK 도착 시각은 같으므로 전송 속도는 같다.
 - `limit 100000`: netem의 기본 큐 상한은 1,000패킷이고, 지연 동안 큐에 머무는 패킷이 이를 넘으면 버려진다(큰 본문 × 동시 요청에서 생길 수 있다). 버림이 지연 조건에 섞이지 않게 크게 둔다.
 - 지연 0도 `netem delay 0ms`를 같은 자리에 건다(veth의 기본은 큐 없음 `noqueue`). 지연 0과 1·10ms의 차이는 지연 값뿐이고, 컨테이너로 옮긴 영향은 지연 0(`delay0ms`)과 호스트 직접 실행(`nodelay`)의 차이로 읽는다.
-- 확인: 회차마다 측정 전에 apiServer 컨테이너에서 ping(20번)과 TCP 연결(10번)을 재 기대와 맞는지 본다(`rtt_check.py` — 최솟값 ≥ X − 0.05ms, ping 중앙값 ≤ X + 1.0 + 0.1·X ms). 맞지 않으면 재지 않는다. 값은 `conditions.json`의 `container.rttCheck`.
+- 확인: 회차마다 측정 전에 dataServer의 qdisc(root `netem`, 지연 X, `limit 100000` — tc는 지연 0의 `delay`를 출력하지 않는다)와, apiServer 컨테이너에서 ping(20번, 손실 0)과 TCP 연결(10번)을 재 기대와 맞는지 본다(`rtt_check.py` — 세 명령의 종료 코드 0, 표본 수, 최솟값 ≥ X − 0.05ms, ping 중앙값 ≤ X + 1.0 + 0.1·X ms). 맞지 않으면 재지 않는다. 값과 실패 이유는 `conditions.json`의 `container.rttCheck`.
+- 다른 컨테이너: 회차 시작 때 이 머신에서 돌던 컨테이너 수와 compose 프로젝트 이름별 수를 `conditions.json`의 `otherContainers`에 적는다(호스트 직접 실행도). 같은 머신의 다른 부하를 읽을 때 본다.
   2026-11-21 확인값(부하가 높은 때): ping 중앙값 0ms 0.13 · 1ms 1.18 · 10ms 10.2ms, TCP 연결 중앙값 0.36 · 1.43 · 10.48ms.
 
 **호스트 직접 실행(`nodelay`)과 다른 것**
