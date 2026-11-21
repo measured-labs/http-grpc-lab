@@ -2,7 +2,7 @@
 
 이 문서는 요청 하나에 응답 하나인 통신(`http-json`, `http-bytes`, `http-proto`, `grpc-unary`)을 같은 조건으로 5회씩 다시 잰 결과다. 2026-01의 Phase 1~7 결과(`docs/phase/`)가 조건당 1~3회였고 경로마다 하는 일이 달라서 다시 쟀다. 예전 문서의 불일치는 [ERRATA.md](ERRATA.md)에 모았다.
 
-결론부터 적는다. 지연이 없는 한 머신에서 경로 사이의 차이가 회차의 변동보다 분명히 큰 것은 세 가지다. 첫째, 바이트를 JSON(Base64)으로 보내면 크기가 커질수록 느려진다(1MB에서 `http-proto`의 약 1/4.5). 둘째, 100KB 이상의 큰 응답에서는 `http-bytes`가 다섯 번 모두 1위이고 `grpc-unary`가 같은 Protobuf 메시지를 HTTP/1.1로 보내는 `http-proto`보다 느리다(1MB에서 −45%). 셋째, 10KB에서는 `grpc-unary`가 다섯 번 모두 1위지만 차이는 `http-proto`보다 7.8%다. 나머지 조건(1KB, 50KB, 동시 사용자 축 전부, 복잡도 축의 Protobuf 두 경로)은 1위가 회차마다 바뀌어 "차이 없음"이다. 10KB의 gRPC 우위도 같은 조건을 다른 시간대에 잰 동시 사용자 축에서는 나오지 않았다. 예전 가이드의 "100KB 이하에서 gRPC가 30~67% 빠르다", "200명 이상이면 gRPC", "필드 150개 이상이면 HTTP"는 재현되지 않았다.
+결론부터 적는다. 지연이 없는 한 머신에서 경로 사이의 차이가 회차의 변동보다 분명히 큰 것은 세 가지다. 첫째, 바이트를 JSON(Base64)으로 보내면 크기가 커질수록 느려진다(1MB에서 `http-proto`의 약 1/4.5). 둘째, 100KB 이상의 큰 응답에서는 `http-bytes`가 다섯 번 모두 1위이고 `grpc-unary`가 같은 Protobuf 메시지를 HTTP/1.1로 보내는 `http-proto`보다 느리다(1MB에서 −45%). 셋째, 10KB에서는 `grpc-unary`가 다섯 번 모두 1위지만 차이는 `http-proto`보다 7.8%다. 나머지 조건(1KB, 50KB, 동시 사용자 축 전부, 복잡도 축의 Protobuf 두 경로 — medium 한 단계만 `grpc-unary` 5/5)은 1위가 회차마다 바뀌어 "차이 없음"이다. 10KB의 gRPC 우위도 같은 조건을 다른 시간대에 잰 동시 사용자 축에서는 나오지 않았다. 예전 가이드의 "100KB 이하에서 gRPC가 30~67% 빠르다", "200명 이상이면 gRPC", "필드 150개 이상이면 HTTP"는 재현되지 않았다.
 
 ## 읽는 법
 
@@ -20,11 +20,11 @@ k6와 두 서버(apiServer, dataServer)가 한 머신(24코어)에서 함께 돈
 
 이 기록에서 읽을 때 조심할 곳은 세 군데다.
 
-- 복잡도 축의 회차 1과 3은 10분을 기다려도 부하가 내려가지 않아 기준을 넘은 채 시작했다(14.58, 11.09 — 표의 `startedAboveMax`, `tables/complexity-nodelay.md`). 복잡도 축의 범위가 넓은 것은 이 때문일 수 있다(예: simple의 `http-json` 3,102~4,208).
+- 복잡도 축은 두 번 쟀다. 첫 측정(11-21 15:58~17:04)은 회차 1과 3이 10분을 기다려도 부하가 내려가지 않아 기준을 넘은 채 시작했다(14.58, 11.09). 그래서 그 원자료는 결과로 쓰지 않고 기록으로만 남겼고(`tables/record-complexity-v1-above-load.md`), 기다리는 상한을 60분으로 늘려 11-22 03:48~04:41에 다시 쟀다. 다시 잰 다섯 회차는 모두 기준 아래(3.64~3.94)에서 시작했다(`tables/complexity-nodelay.md`). 이 문서의 복잡도 수치는 다시 잰 값이다.
 - 동시 사용자 축의 기본 설정은 회차 사이의 범위가 넓다. 동시 200에서 `grpc-unary` 6,052~9,979, `http-proto` 6,773~10,095다(`tables/concurrency-default-nodelay.md`).
 - 같은 조건이라도 재는 시간대가 다르면 값이 다르다. 10KB·동시 10은 크기 축(04:36~06:02)에서 `grpc-unary` 4,862로 5/5 1위였지만, 동시 사용자 축의 동시 10(13:19~)에서는 `grpc-unary` 4,129, `http-proto` 4,398이고 1위가 회차마다 바뀌었다(`tables/size-nodelay.md`, `tables/concurrency-default-nodelay.md`). 서로 다른 축의 표끼리는 견주지 않는다.
 
-호스트 실행의 회차에는 다른 컨테이너 수의 기록이 없다(기록 기능이 지연 조건 작업에서 더해졌다). 측정 log에는 복잡도 축이 끝난 17:04에 다른 프로젝트의 java 프로세스와 컨테이너가 돌고 있었다고 적혀 있다. 지연 조건 15번의 실행은 모두 다른 컨테이너 0개에서 시작했다.
+호스트 실행의 회차에는 다른 컨테이너 수의 기록이 없다(기록 기능이 지연 조건 작업에서 더해졌다). 지연 조건 15번의 실행과 다시 잰 복잡도 축의 다섯 회차는 모두 다른 컨테이너 0개에서 시작했다.
 
 ## 크기 축 — 호스트 직접 실행, 동시 10
 
@@ -62,7 +62,7 @@ k6와 두 서버(apiServer, dataServer)가 한 머신(24코어)에서 함께 돈
 
 두 서버 사이의 본문 크기는 `results/2026-11/sizes.json`에 조건과 경로마다 한 번 잰 값이다(표의 "두 서버 사이의 본문 크기" 열). `http-bytes`는 원래 크기 그대로(1MB = 1,048,576바이트), `http-proto`는 그보다 51~53바이트 크고(1,048,629), `http-json`은 Base64 때문에 약 1.33배다(1,398,217). `grpc-unary`는 재지 않고 `http-proto`의 메시지에 gRPC 메시지 머리 5바이트를 더한 값으로 적었다(1,048,634, HTTP/2 프레임 제외). 따라서 `http-proto`와 `grpc-unary`의 차이는 본문 크기의 차이가 아니다.
 
-복잡도 축에서도 직렬화의 효과는 분명하고, 전송 방식의 효과는 보이지 않는다(`tables/complexity-nodelay.md`). `http-proto` ÷ `http-json`은 +10.0%(complex)~+141.3%(extreme)이고 simple을 빼면 5/5다. `grpc-unary` ÷ `http-proto`는 −8.5%~+5.4%이고 어느 단계에서도 5/5가 아니다. JSON 본문은 Protobuf보다 1.63~2.54배 크다(직접 계산: medium 728 ÷ 446 ≈ 1.63, simple 226 ÷ 89 ≈ 2.54, extreme 421,477 ÷ 219,522 ≈ 1.92).
+복잡도 축에서는 데이터가 커질수록 직렬화의 효과가 분명하고, 전송 방식의 효과는 작다(`tables/complexity-nodelay.md`). `http-proto` ÷ `http-json`은 complex +18.5%, ultra +41.5%, extreme +138.2%이고 이 세 단계에서 5/5다. simple(+13.3%)과 medium(+6.8%)에서는 `http-proto`가 앞선 회차가 3/5다. `grpc-unary` ÷ `http-proto`는 +2.9%~+10.8%이고 5/5인 것은 medium(+10.8%) 하나다. 나머지 단계에서는 `grpc-unary`가 앞선 회차가 3/5~4/5다. JSON 본문은 Protobuf보다 1.63~2.54배 크다(직접 계산: medium 728 ÷ 446 ≈ 1.63, simple 226 ÷ 89 ≈ 2.54, extreme 421,477 ÷ 219,522 ≈ 1.92).
 
 ## 동시 사용자 축 — 10KB, 호스트 직접 실행, 두 설정
 
@@ -96,13 +96,13 @@ p95 지연은 처리량과 다른 모습을 보인다. 동시 100과 200에서 `
 
 | 단계 | `http-json` | `http-proto` | `grpc-unary` | 1위 |
 |---|---|---|---|---|
-| simple | 3,489 [3,102~4,208] | 4,197 [3,443~4,352] | 3,840 [3,537~4,047] | 차이 없음 (proto 3, json 2) |
-| medium | 3,866 [3,735~4,121] | 4,408 [4,277~4,521] | 4,536 [3,972~4,829] | 차이 없음 (gRPC 4, proto 1) |
-| complex | 3,711 [3,709~3,809] | 4,083 [3,949~4,201] | 4,303 [3,888~4,363] | 차이 없음 (gRPC 3, proto 2) |
-| ultra | 2,093 [1,922~2,155] | 3,061 [2,776~3,124] | 3,149 [2,369~3,218] | 차이 없음 (gRPC 4, proto 1) |
-| extreme | 343 [299~345] | 828 [756~845] | 806 [762~889] | 차이 없음 (gRPC 3, proto 2) |
+| simple | 3,732 [3,460~4,333] | 4,228 [3,900~4,520] | 4,487 [4,080~4,578] | 차이 없음 (gRPC 3, proto 2) |
+| medium | 4,064 [3,957~4,121] | 4,340 [3,840~4,558] | 4,808 [4,440~4,844] | `grpc-unary` 5/5 |
+| complex | 3,490 [3,446~3,905] | 4,137 [3,875~4,209] | 4,306 [1,978~4,412] | 차이 없음 (gRPC 3, proto 2) |
+| ultra | 2,192 [1,987~2,210] | 3,100 [2,781~3,205] | 3,195 [2,833~3,268] | 차이 없음 (gRPC 4, proto 1) |
+| extreme | 361 [332~366] | 861 [740~874] | 886 [769~898] | 차이 없음 (gRPC 4, proto 1) |
 
-Protobuf 두 경로는 모든 단계에서 1위가 바뀌어 차이가 없다. `http-json`은 medium부터 `http-proto`보다 5/5로 낮다. simple에서는 `http-json`이 두 회차에서 1위였으므로 세 경로 모두 차이 없음이다. 예전 결론 "필드 150개 이상(ultra)이면 HTTP가 12~18% 빠르다"는 재현되지 않았다. 예전 측정의 복잡한 데이터 HTTP 바이트 경로는 응답을 객체로 풀지 않았고(ERRATA 15번), 이번에는 세 경로 모두 객체로 푼다. 이 축의 회차 1·3은 부하 기준을 넘은 채 시작했다(위 "측정 환경").
+Protobuf 두 경로는 medium(`grpc-unary` 5/5, `http-proto`보다 10.8% 높고 범위는 조금 겹친다)을 빼면 1위가 회차마다 바뀌어 차이가 없다. `grpc-unary`가 1위인 회차가 다섯 단계 모두에서 더 많지만(3~5회) 폭은 2.9~10.8%다. complex의 회차 3에서는 `grpc-unary`만 1,978로 낮게 나왔다(다른 네 회차는 4,119~4,412). 버리지 않고 그대로 넣었다. `http-json`은 1위인 회차가 없고, complex부터 `http-proto`보다 5/5로 낮다. simple과 medium에서는 `http-json`이 `http-proto`를 앞선 회차가 두 번씩 있다. 첫 측정(기록)도 같은 방향이었다: Protobuf 두 경로는 1위가 바뀌었고 `http-json`은 ultra와 extreme에서 크게 낮았다. 예전 결론 "필드 150개 이상(ultra)이면 HTTP가 12~18% 빠르다"는 재현되지 않았다. 예전 측정의 복잡한 데이터 HTTP 바이트 경로는 응답을 객체로 풀지 않았고(ERRATA 15번), 이번에는 세 경로 모두 객체로 푼다.
 
 ## 지연 조건 — 컨테이너, 크기 축, 동시 10
 
@@ -141,7 +141,7 @@ Protobuf 두 경로는 모든 단계에서 1위가 바뀌어 차이가 없다. `
 - "소용량 API (≤100KB) — gRPC/Unary — 30~67% 더 빠름": 호스트 실행에서 `grpc-unary`가 5/5로 앞선 것은 10KB 하나이고 폭은 `http-proto`보다 7.8%, `http-bytes`보다 11.4%다. 1KB와 50KB는 차이 없음, 100KB는 `grpc-unary`가 `http-bytes`보다 낮다.
 - "고동시성 (200+ VU) — gRPC/Unary — 9~12% 더 빠름": 두 설정 모두 처리량의 1위가 회차마다 바뀌었다. `grpc-unary`가 1위인 회차가 없는 조건이 다섯 군데(두 설정의 동시 10과 500, `matched`의 동시 50)이고, `grpc-unary`가 `http-proto`를 5/5로 앞선 조건은 없다. p95는 동시 100~200에서 `grpc-unary`가 낮은 회차가 많다.
 - "저동시성 (< 100 VU) — HTTP/Binary — 3~13% 더 빠름": 동시 10·50 모두 차이 없음이다.
-- "복잡한 구조 (≤50 필드) — gRPC/Unary — 40~69% 더 빠름": `grpc-unary`와 `http-proto`는 차이 없음이고, `http-proto`는 `http-json`보다 medium에서 14.0%, complex에서 10.0% 높고(5/5), simple에서는 차이 없음이다.
+- "복잡한 구조 (≤50 필드) — gRPC/Unary — 40~69% 더 빠름": `grpc-unary`가 `http-proto`를 5/5로 앞선 것은 medium(+10.8%)뿐이고 simple과 complex는 차이 없음이다. `http-proto`는 `http-json`보다 complex에서 18.5% 높고(5/5), simple과 medium에서는 3/5다.
 - "극한 복잡도 (≥150 필드) — HTTP/Binary — 12~18% 더 빠름": ultra와 extreme에서도 Protobuf 두 경로는 차이 없음이고 `http-json`이 가장 낮다.
 - "대용량 전송 (≥200KB) — HTTP/Binary — 14~60% 더 빠름": `http-bytes`가 5/5 1위인 것은 재현됐다. 다만 범위는 100KB부터이고, 200KB에서 `grpc-unary`보다 34%(직접 계산: 3,229 ÷ 2,417 − 1), 1MB에서 2.07배다. `http-proto`보다는 200KB에서 5.7%, 1MB에서 14.2% 높다(직접 계산: 3,229 ÷ 3,054 − 1, 1,429 ÷ 1,251 − 1).
 
@@ -170,7 +170,8 @@ scripts/remeasure/make-tables.sh          # docs/remeasure/tables/*.md를 다시
 | `tables/size-nodelay.md` | `results/2026-11/nodelay/size-default` | 크기 축, 호스트 |
 | `tables/concurrency-default-nodelay.md` | `results/2026-11/nodelay/concurrency-default` | 동시 사용자 축, `default` |
 | `tables/concurrency-matched-nodelay.md` | `results/2026-11/nodelay/concurrency-matched` | 동시 사용자 축, `matched`(고친 구성) |
-| `tables/complexity-nodelay.md` | `results/2026-11/nodelay/complexity-default` | 복잡도 축 |
+| `tables/complexity-nodelay.md` | `results/2026-11/nodelay/complexity-default` | 복잡도 축(다시 잰 것) |
+| `tables/record-complexity-v1-above-load.md` | `results/2026-11/nodelay/complexity-default-v1-above-load` | 기록: 부하 기준을 넘은 회차가 있는 첫 측정 |
 | `tables/size-delay0ms.md`, `size-delay1ms.md`, `size-delay10ms.md` | `results/2026-11/delay{0,1,10}ms/size-default` | 지연 조건(1·10ms는 `delay0ms`와 견줌) |
 | `tables/size-delay0ms-vs-nodelay.md` | 위 둘 | 참고: 컨테이너와 호스트의 차이 |
 | `tables/record-concurrency-matched-v1-fixed-executor.md` | `results/2026-11/nodelay/concurrency-matched-v1-fixed-executor` | 기록: 잘못된 구성 |
