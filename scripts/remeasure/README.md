@@ -124,10 +124,18 @@ scripts/remeasure/run.sh --axis size --config default --delay 10    # 한 지연
 ```bash
 python3 scripts/remeasure/summarize.py results/2026-11/nodelay/size-default            # 표준 출력
 python3 scripts/remeasure/summarize.py results/2026-11/nodelay/size-default -o table.md
+python3 scripts/remeasure/summarize.py results/2026-11/delay10ms/size-default \
+        --baseline results/2026-11/delay0ms/size-default                      # delay0ms와 견준 변화를 더한다
+scripts/remeasure/make-tables.sh                                               # docs/remeasure/tables/*.md를 모두 다시 만든다
 ```
+
+`make-tables.sh`는 `results/2026-11/`의 축 폴더마다 `summarize.py`를 불러 `docs/remeasure/tables/`에 표를 쓴다(어느 폴더를 어느 폴더와 견주는지는 스크립트 안의 목록).
+같은 원자료에서 두 번 돌리면 같은 파일이 나온다. `docs/remeasure/RESULT.md`의 수치는 이 표에서 옮긴다.
 
 조건마다 경로별 회차 처리량과 중앙값·최소·최대, k6 지연(중앙값, p95), 서버가 잰 하위 호출 지연,
 두 서버 사이의 본문 크기(`results/2026-11/sizes.json`, `--sizes`로 바꿈 — 없으면 열을 비우고 경고),
-k6가 받은 바이트(apiServer의 응답)/요청, 회차별 1위와 "모든 회차에서 같음/회차마다 갈림", 1위와 처리량 구간이 겹치는지를 적는다.
+k6가 받은 바이트(apiServer의 응답)/요청, 회차별 1위와 "모든 회차에서 같음/회차마다 갈림", 1위와 처리량 구간이 겹치는지, 회차별 p95가 가장 낮은 경로를 적는다.
+맨 앞의 "요약"은 조건 × 경로의 처리량 중앙값 [최소~최대]와 1위가 모든 회차에서 같았는지다. `--baseline`을 주면 조건과 경로마다 견준 폴더의 중앙값 대비 처리량 변화(%)와 서버 하위 호출 평균의 차이(ms)를 더한다.
+"측정 조건"에는 회차별 시작·끝 부하, 기다린 시간, 기준을 넘은 채 시작했는지(`startedAboveMax`), 회차별 시각도 적는다.
 "측정 조건"에는 실행 방식(`host-jar` / `docker-compose`), 다른 컨테이너 수(회차별)를 적고, 지연 조건이면 지연 값과 그 뜻, 회차별 왕복 확인값(ping 중앙값),
 이미지 id, 이미지의 JDK를 더한다(호스트 실행의 원자료에서는 없는 값을 "기록 없음"으로 둔다).
