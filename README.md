@@ -41,7 +41,8 @@ HTTP vs gRPC 프로토콜 성능 비교 벤치마크 프로젝트
 | 바이트 덩어리를 보냄, 100KB 이상 | `http-bytes` | 동시 10, 호스트, 5/5 1위. 1MB에서 1,429 [1,424~1,434] 대 `http-proto` 1,251, `grpc-unary` 689, `http-json` 277 | `tables/size-nodelay.md` |
 | 바이트를 JSON에 담아 보냄 | 쓰지 않는다 | 동시 10, 호스트, 10KB 이상에서 `http-proto`가 5/5로 앞선다. 10KB에서 20.0%(4,508 [4,495~4,557] 대 3,758 [3,738~3,792]), 1MB에서 4.5배(1,251 [1,251~1,255] 대 277 [273~280]) | `tables/size-nodelay.md` |
 | 구조가 있는 데이터, complex~extreme | Protobuf (`http-proto`와 `grpc-unary`는 차이 없음) | 동시 10, 호스트. `http-proto`가 `http-json`을 5/5로 앞선다: complex 18.5%(4,137 [3,875~4,209] 대 3,490 [3,446~3,905]), extreme 138.2%(861 [740~874] 대 361 [332~366]). 두 Protobuf 경로끼리는 1위가 회차마다 바뀜(`grpc-unary` 3~4회, 폭 2.9~4.1%) | `tables/complexity-nodelay.md` |
-| 구조가 있는 데이터, simple·medium | 차이가 작다 | 동시 10, 호스트. `http-json`이 1위인 회차는 없지만 `http-proto`를 앞선 회차가 두 번씩 있다. medium은 `grpc-unary` 5/5: 4,808 [4,440~4,844] 대 `http-proto` 4,340 [3,840~4,558](+10.8%, 범위는 겹침) | `tables/complexity-nodelay.md` |
+| 구조가 있는 데이터, medium | `grpc-unary` (폭은 작다) | 동시 10, 호스트, 5/5. 4,808 [4,440~4,844] 대 `http-proto` 4,340 [3,840~4,558](+10.8%, 범위는 겹침), `http-json` 4,064 [3,957~4,121]. 부하 기준을 넘은 회차가 있던 첫 측정에서는 4/5였다 | `tables/complexity-nodelay.md` |
+| 구조가 있는 데이터, simple(필드 몇 개) | 차이 없음 | 동시 10, 호스트. 1위가 `grpc-unary` 3회, `http-proto` 2회. `http-json`은 1위인 회차가 없지만 `http-proto`를 두 회차에서 앞섰다 | `tables/complexity-nodelay.md` |
 | 10KB, 동시 10, 지연 없음 | 차이 없음에 가깝다 (잰 때에 따라 다름) | 크기 축에서는 `grpc-unary` 5/5: 4,862 [4,846~4,908] 대 `http-proto` 4,508 [4,495~4,557](+7.8%). 같은 조건을 다른 시간대에 잰 동시 사용자 축에서는 `grpc-unary`가 1위인 회차가 없다(기본 설정 4,129 [3,217~4,241] 대 4,398 [3,572~4,533]) | `tables/size-nodelay.md`, `tables/concurrency-default-nodelay.md` |
 | 1KB, 50KB, 동시 10 | 차이 없음 | `http-proto`·`http-bytes`·`grpc-unary`가 3.1% 안, 1위가 회차마다 바뀜 | `tables/size-nodelay.md` |
 | 동시 사용자 10~500 (10KB) | 차이 없음 (처리량). `grpc-unary`가 앞서는 구간은 없다 | 호스트, 기본 설정과 맞춘 설정 모두 1위 경로가 회차마다 바뀜. 동시 10과 500(두 설정), 맞춘 설정의 동시 50에서는 `grpc-unary`가 1위인 회차가 없고 `http-proto`보다 4.5~19.6% 낮다(범위는 겹침. 맞춘 설정의 동시 500: 8,651 [8,283~9,734] 대 9,727 [9,131~9,880]). 동시 100~200에서는 세 경로가 엇갈린다. p95는 동시 100~200에서 `grpc-unary`가 가장 낮은 회차가 4/5~5/5 | `tables/concurrency-*-nodelay.md` |
@@ -603,7 +604,7 @@ cd scripts
 
 ## 🎯 핵심 인사이트
 
-> 2026-01 측정에서 쓴 인사이트다. 1번과 3번은 다시 잰 결과에서 재현되지 않았다. 2번의 "대용량에서 Protobuf 오버헤드"는 방향은 맞지만, 다시 잰 결과에서 느린 곳은 직렬화가 아니라 gRPC 전송 쪽이었다(`docs/remeasure/RESULT.md` "예전 결론 가운데 재현되지 않은 것", "전송 방식과 직렬화를 나눠 본 결과").
+> 2026-01 측정에서 쓴 인사이트다. 1번과 3번은 다시 잰 결과에서 재현되지 않았다. 2번의 "대용량에서 Protobuf 오버헤드"는 방향은 맞지만, 다시 잰 결과에서 느린 곳은 직렬화가 아니라 gRPC 전송 쪽이었다. 2번의 "극한 복잡도에서 빌더 생성 비용"과 5번 표의 "REST API(소용량) → gRPC", "마이크로서비스 간 통신 → gRPC", "극복잡 데이터 처리 → HTTP/Binary"도 다시 잰 결과로는 뒷받침되지 않는다. 지금의 가이드는 맨 위의 "프로토콜 선택 가이드 (2026-11 다시 재기)"다. 4번(CPU 효율)은 다시 재지 않았다(`docs/remeasure/RESULT.md` "예전 결론 가운데 재현되지 않은 것", "전송 방식과 직렬화를 나눠 본 결과").
 
 ### 1. "gRPC가 항상 빠르다"는 오해
 
