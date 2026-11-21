@@ -1,0 +1,47 @@
+# 다시 재기(2026-11) 지연 조건 — apiServer와 dataServer를 컨테이너로 띄우고 dataServer에서 나가는 쪽에 지연을 건다.
+# 보통은 scripts/remeasure/run.sh --delay 0|1|10 이 띄우고 내린다. 구성과 뜻: docs/remeasure/PATHS.md "지연 조건의 구성"
+#
+# 직접 띄울 때(jar는 먼저 두 모듈에서 ./gradlew bootJar):
+#   DELAY_MS=10 docker compose -f docker-compose.remeasure.yml up -d --build
+#   docker compose -f docker-compose.remeasure.yml down
+#
+# 환경 변수: DELAY_MS(필수, 밀리초) · SPRING_PROFILES_ACTIVE, BENCH_MAX_CONCURRENCY(있을 때만 넘긴다 — run.sh와 같음)
+#            RM_MAX_LIFETIME_S(컨테이너 수명 상한, 기본 10800초)
+name: rm-http-grpc
+
+x-server: &server
+  build: scripts/remeasure/container
+  image: rm-http-grpc/jre21-nettools:1
+  init: true
+  stop_grace_period: 15s
+  # CPU·메모리 제한은 두지 않는다(호스트 직접 실행과 같게).
+
+services:
+  dataServer:
+    <<: *server
+    # tc로 eth0에 지연을 걸 권한만 준다(privileged 아님)
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ./dataServer/build/libs/dataServer-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    environment:
+      - NETEM_DELAY_MS=${DELAY_MS:?DELAY_MS(밀리초)를 주어야 한다}
+      - RM_MAX_LIFETIME_S=${RM_MAX_LIFETIME_S:-10800}
+      - SPRING_PROFILES_ACTIVE
+      - BENCH_MAX_CONCURRENCY
+    # 포트를 호스트에 열지 않는다 — apiServer만 브리지 네트워크로 부른다
+
+  apiServer:
+    <<: *server
+    depends_on: [dataServer]
+    volumes:
+      - ./apiServer/build/libs/apiServer-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    environment:
+      # application.yml의 data-server.* 를 환경 변수로 덮어쓴다(Spring의 이름 규칙)
+      - DATA_SERVER_HTTP_URL=http://dataServer:8081
+      - DATA_SERVER_GRPC_HOST=dataServer
+      - DATA_SERVER_GRPC_PORT=9091
+      - RM_MAX_LIFETIME_S=${RM_MAX_LIFETIME_S:-10800}
+      - SPRING_PROFILES_ACTIVE
+      - BENCH_MAX_CONCURRENCY
+    ports:
+      - "127.0.0.1:8080:8080"

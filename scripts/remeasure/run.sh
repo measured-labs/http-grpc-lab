@@ -8,7 +8,9 @@ usage() {
 사용: scripts/remeasure/run.sh --axis size|concurrency|complexity --config default|matched [옵션]
   --rounds N         반복 횟수 (기본 5)               [ROUNDS]
   --duration D       측정 한 번의 길이 (기본 30s)     [DURATION]
-  --label NAME       결과 이름표 (기본 nodelay)       [LABEL]
+  --label NAME       결과 이름표 (기본 nodelay, --delay X 이면 delayXms) [LABEL]
+  --delay MS         두 서버를 컨테이너로 띄우고 dataServer에서 나가는 쪽에 MS 밀리초 지연(0|1|10) [DELAY]
+                     (docker-compose.remeasure.yml — 없으면 호스트에서 jar를 직접 띄운다)
   --max-load X       회차를 시작할 1분 부하 평균의 기준 (기본 4.0) [MAX_LOAD]
   --max-wait S       부하가 기준 아래로 내려가길 기다리는 최대 초 (기본 600) [MAX_WAIT]
                      넘으면 멈추지 않고 시작하고 conditions.json에 적는다
@@ -23,7 +25,7 @@ EOF
 }
 
 AXIS="${AXIS:-}"; CONFIG="${CONFIG:-}"
-ROUNDS="${ROUNDS:-5}"; DURATION="${DURATION:-30s}"; LABEL="${LABEL:-nodelay}"
+ROUNDS="${ROUNDS:-5}"; DURATION="${DURATION:-30s}"; LABEL="${LABEL:-}"; DELAY="${DELAY:-}"
 MAX_LOAD="${MAX_LOAD:-4.0}"; WARMUP="${WARMUP:-200}"; WARMUP_VUS="${WARMUP_VUS:-10}"; PAUSE="${PAUSE:-3}"
 MAX_WAIT="${MAX_WAIT:-600}"; ONLY_CONDITIONS="${ONLY_CONDITIONS:-}"; BUILD=1; ALLOW_DIRTY=0
 LOAD_CHECK_INTERVAL=10
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
     --rounds) ROUNDS="$2"; shift 2 ;;
     --duration) DURATION="$2"; shift 2 ;;
     --label) LABEL="$2"; shift 2 ;;
+    --delay) DELAY="$2"; shift 2 ;;
     --max-load) MAX_LOAD="$2"; shift 2 ;;
     --warmup) WARMUP="$2"; shift 2 ;;
     --warmup-vus) WARMUP_VUS="$2"; shift 2 ;;
@@ -52,6 +55,14 @@ die() { echo "중단: $*" >&2; exit 1; }
 
 case "$CONFIG" in default|matched) ;; *) usage >&2; die "설정은 default 또는 matched";; esac
 [[ "$ROUNDS" =~ ^[1-9][0-9]*$ ]] || die "반복 횟수가 잘못됨: $ROUNDS"
+# --delay: 있으면 컨테이너 방식(CONTAINER=1)
+CONTAINER=0
+if [ -n "$DELAY" ]; then
+  case "$DELAY" in 0|1|10) CONTAINER=1 ;; *) die "지연은 0, 1, 10(밀리초) 중 하나: $DELAY" ;; esac
+fi
+if [ -z "$LABEL" ]; then
+  if [ "$CONTAINER" -eq 1 ]; then LABEL="delay${DELAY}ms"; else LABEL="nodelay"; fi
+fi
 [[ "$WARMUP" =~ ^[0-9]+$ ]] || die "워밍업 횟수가 잘못됨: $WARMUP"
 [[ "$LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || die "이름표가 잘못됨: $LABEL"
 [[ "$MAX_WAIT" =~ ^[0-9]+$ ]] || die "최대 대기 시간이 잘못됨: $MAX_WAIT"
@@ -88,9 +99,25 @@ DATA_JAR="$ROOT/dataServer/build/libs/dataServer-0.0.1-SNAPSHOT.jar"
 API_JAR="$ROOT/apiServer/build/libs/apiServer-0.0.1-SNAPSHOT.jar"
 OUT="$ROOT/results/2026-11/$LABEL/$AXIS-$CONFIG"
 PORTS=(8080 8081 9091)
+COMPOSE_FILE="$ROOT/docker-compose.remeasure.yml"
+COMPOSE_PROJECT=rm-http-grpc
+# 컨테이너 방식에서는 dataServer의 포트를 호스트에 열지 않으므로 8080만 본다
+[ "$CONTAINER" -eq 1 ] && PORTS=(8080)
 
 # ---------- 실행 전 확인 ----------
 for t in java k6 curl ss python3; do command -v "$t" >/dev/null || die "$t 가 없다"; done
+if [ "$CONTAINER" -eq 1 ]; then
+  command -v docker >/dev/null || die "docker 가 없다"
+  docker compose version >/dev/null 2>&1 || die "docker compose 가 없다"
+  [ -f "$COMPOSE_FILE" ] || die "없다: $COMPOSE_FILE"
+fi
+# 이 프로젝트(rm-http-grpc)의 compose만 다룬다. 시간 제한을 건다.
+export DELAY_MS="$DELAY"
+dc() { timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"; }
+if [ "$CONTAINER" -eq 1 ]; then
+  left="$(docker ps -a -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT")"
+  [ -z "$left" ] || die "이전 실행의 $COMPOSE_PROJECT 컨테이너가 남아 있다 — 확인 뒤 DELAY_MS=0 docker compose -f docker-compose.remeasure.yml down"
+fi
 
 busy_ports() { local p out=""; for p in "${PORTS[@]}"; do ss -Htln "sport = :$p" | grep -q . && out+="$p "; done; echo "$out"; }
 b="$(busy_ports)"; [ -z "$b" ] || die "포트가 쓰이고 있다: $b(이 실험의 서버는 8080·8081·9091이 비어 있을 때만 띄운다)"
@@ -123,26 +150,49 @@ if [ "$BUILD" -eq 1 ]; then
 fi
 [ -f "$DATA_JAR" ] && [ -f "$API_JAR" ] || die "jar가 없다 — --no-build를 빼고 돌리거나 두 서버에서 ./gradlew bootJar"
 
+# 컨테이너 방식: 이미지(JDK 21 런타임 + tc, ping)를 만든다. jar는 이미지에 넣지 않고 compose가 읽기 전용으로 붙인다.
+if [ "$CONTAINER" -eq 1 ]; then
+  echo "이미지: docker compose build (rm-http-grpc/jre21-nettools:1)"
+  dc build -q || die "이미지를 만들지 못했다"
+  IMAGE_TAG="rm-http-grpc/jre21-nettools:1"
+  IMAGE_ID="$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')"
+  BASE_IMAGE="eclipse-temurin:21-jre $(docker image inspect eclipse-temurin:21-jre --format '{{index .RepoDigests 0}} {{.Id}}' 2>/dev/null)"
+  DOCKER_VERSION="$(docker version --format 'server {{.Server.Version}} client {{.Client.Version}}')"
+  COMPOSE_VERSION="$(docker compose version --short)"
+  CONTAINER_JDK="$(dc run --rm --no-deps -T --entrypoint java dataServer -version 2>&1 | head -1)"
+  [ -n "$CONTAINER_JDK" ] || die "이미지의 java 버전을 읽지 못했다"
+  export IMAGE_TAG IMAGE_ID BASE_IMAGE DOCKER_VERSION COMPOSE_VERSION CONTAINER_JDK
+fi
+
 # ---------- 회차 공통 조건 ----------
 COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
 TRACKED_DIRTY="$(git -C "$ROOT" status --porcelain --untracked-files=no)"
 JDK="$(java -version 2>&1 | head -1)"
+[ "$CONTAINER" -eq 1 ] && JDK="$CONTAINER_JDK"
 K6V="$(k6 version 2>&1 | head -1)"
 CORES="$(nproc)"
 CPU_MODEL="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
 # jar가 커밋과 따로 빌드될 수 있으므로 jar 자체를 식별할 값도 남긴다
 JARS="$(for j in "$DATA_JAR" "$API_JAR"; do echo "$(basename "$j") sha256=$(sha256sum "$j" | cut -c1-16) built=$(date -Iseconds -r "$j")"; done)"
 export JARS COMMIT TRACKED_DIRTY JDK K6V CORES CPU_MODEL AXIS CONFIG DURATION WARMUP WARMUP_VUS PAUSE ROUNDS LABEL MAX_LOAD
-export MAX_WAIT LOAD_CHECK_INTERVAL BUILD ALLOW_DIRTY ONLY_CONDITIONS
+export MAX_WAIT LOAD_CHECK_INTERVAL BUILD ALLOW_DIRTY ONLY_CONDITIONS CONTAINER DELAY COMPOSE_PROJECT
 
 # ---------- 서버와 정리 ----------
 STARTED_PIDS=()
+COMPOSE_UP=0
 K6_PID=""
 ROUND_DIR=""
 ROUND_STATUS=""
 
 stop_servers() {
   local pid i
+  if [ "$CONTAINER" -eq 1 ]; then
+    [ "$COMPOSE_UP" -eq 1 ] || return 0
+    save_container_logs
+    dc down --timeout 15 >/dev/null 2>&1 || echo "경고: docker compose down 실패 — docker ps로 $COMPOSE_PROJECT 컨테이너를 확인한다" >&2
+    COMPOSE_UP=0
+    return 0
+  fi
   for pid in "${STARTED_PIDS[@]}"; do kill -TERM "$pid" 2>/dev/null; done
   for i in $(seq 1 30); do
     local alive=0
@@ -169,6 +219,10 @@ on_exit() {
   if [ -n "$K6_PID" ]; then kill -TERM "$K6_PID" 2>/dev/null; wait "$K6_PID" 2>/dev/null; fi
   if [ ${#STARTED_PIDS[@]} -gt 0 ]; then
     echo "정리: 띄운 서버를 끈다 (pid ${STARTED_PIDS[*]})" >&2
+    stop_servers
+  fi
+  if [ "$COMPOSE_UP" -eq 1 ]; then
+    echo "정리: $COMPOSE_PROJECT 컨테이너를 내린다" >&2
     stop_servers
   fi
   # 회차가 끝나지 않은 채 나가면 그 회차를 interrupted로 적는다(지우지 않는다)
@@ -209,6 +263,44 @@ wait_ready() {  # $1=pid $2=로그 $3..=확인 명령
 data_ready() { curl -sf -o /dev/null http://localhost:8081/actuator/health && ss -Htln "sport = :9091" | grep -q .; }
 api_ready() { curl -sf -o /dev/null http://localhost:8080/api/health; }
 
+# ---------- 컨테이너 방식 ----------
+save_container_logs() {
+  [ -n "$ROUND_DIR" ] && [ -d "$ROUND_DIR" ] || return 0
+  local s; for s in dataServer apiServer; do
+    dc logs --no-color --no-log-prefix "$s" > "$ROUND_DIR/$s.log" 2>/dev/null
+  done
+}
+container_up() {  # $1=서비스. 설정은 호스트 방식(start_server)과 같은 환경 변수로 넘긴다
+  COMPOSE_UP=1
+  if [ "$CONFIG" = matched ]; then
+    env SPRING_PROFILES_ACTIVE=matched timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --no-build --no-deps "$1" >/dev/null 2>&1
+  else
+    env -u SPRING_PROFILES_ACTIVE -u BENCH_MAX_CONCURRENCY timeout 180 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --no-build --no-deps "$1" >/dev/null 2>&1
+  fi || { echo "docker compose up $1 실패" >&2; return 1; }
+  echo "  $1 컨테이너 시작 ($(dc ps -q "$1" | cut -c1-12), 지연 ${DELAY}ms)"
+}
+container_wait_ready() {  # $1=서비스 $2=확인 명령
+  local svc="$1" cid i; shift
+  cid="$(dc ps -q "$svc")"
+  for i in $(seq 1 120); do
+    [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = true ] || {
+      save_container_logs; echo "컨테이너가 멈췄다: $svc — $ROUND_DIR/$svc.log" >&2; return 1; }
+    dc logs --no-color --no-log-prefix "$svc" > "$ROUND_DIR/$svc.log" 2>/dev/null
+    if grep -q '^BENCH_CONFIG' "$ROUND_DIR/$svc.log" && "$@"; then return 0; fi
+    sleep 0.5
+  done
+  echo "60초 안에 뜨지 않았다 — $ROUND_DIR/$svc.log" >&2; return 1
+}
+data_ready_c() { dc exec -T dataServer sh -c 'curl -sf -o /dev/null http://localhost:8081/actuator/health && ss -Htln "sport = :9091" | grep -q .' 2>/dev/null; }
+# 측정 전에 apiServer → dataServer 왕복 시간을 재 기대값(바탕 + 지연)과 맞는지 본다. 결과: $STATE/rtt_check.json
+container_rtt_check() {
+  dc exec -T dataServer tc qdisc show dev eth0 > "$STATE/qdisc" 2>&1
+  dc exec -T apiServer ping -c 20 -i 0.2 dataServer > "$STATE/ping.txt" 2>&1
+  dc exec -T apiServer sh -c 'for i in $(seq 1 10); do curl -s -o /dev/null -w "%{time_namelookup} %{time_connect}\n" http://dataServer:8081/actuator/health; sleep 0.1; done' \
+    > "$STATE/tcp_connect.txt" 2>&1
+  python3 "$HERE/rtt_check.py" "$DELAY" "$STATE/ping.txt" "$STATE/tcp_connect.txt" "$STATE/rtt_check.json"
+}
+
 run_k6() {  # $1=요약 JSON $2=k6 출력 로그, 나머지 = -e 인자들. 종료 코드를 돌려준다
   local summary="$1" log="$2"; shift 2
   k6 run --quiet --no-color --summary-export "$summary" \
@@ -224,6 +316,7 @@ run_k6() {  # $1=요약 JSON $2=k6 출력 로그, 나머지 = -e 인자들. 종�
 NPATH=${#PATHS[@]}
 TOTAL_START=$(date +%s)
 echo "축 $AXIS · 설정 $CONFIG · ${ROUNDS}회 · 한 번 $DURATION · 결과 $OUT"
+[ "$CONTAINER" -eq 1 ] && echo "컨테이너 방식($COMPOSE_PROJECT) · dataServer에서 나가는 쪽 지연 ${DELAY}ms"
 mkdir -p "$OUT"
 
 # 1분 부하 평균이 기준 아래로 내려갈 때까지 기다린다. 최대 대기를 넘으면 그대로 시작하고 적는다.
@@ -265,12 +358,22 @@ for r in $(seq 1 "$ROUNDS"); do
   ps -eo pid,pcpu,comm --sort=-pcpu | head -6 > "$STATE/top_before"
   echo "회차 $r/$ROUNDS — 경로 순서: ${ORDER[*]} (부하 $(cat "$STATE/load_before"), 기다린 시간 $(cat "$STATE/load_wait_seconds")초)"
 
-  start_server dataServer "$DATA_JAR" "$ROUND_DIR/dataServer.log"
-  DATA_PID=${STARTED_PIDS[-1]}
-  if ! wait_ready "$DATA_PID" "$ROUND_DIR/dataServer.log" data_ready; then write_conditions failed-start; touch "$STATE/final"; exit 1; fi
-  start_server apiServer "$API_JAR" "$ROUND_DIR/apiServer.log"
-  API_PID=${STARTED_PIDS[-1]}
-  if ! wait_ready "$API_PID" "$ROUND_DIR/apiServer.log" api_ready; then write_conditions failed-start; touch "$STATE/final"; exit 1; fi
+  if [ "$CONTAINER" -eq 1 ]; then
+    if ! { container_up dataServer && container_wait_ready dataServer data_ready_c; }; then write_conditions failed-start; touch "$STATE/final"; exit 1; fi
+    if ! { container_up apiServer && container_wait_ready apiServer api_ready; }; then write_conditions failed-start; touch "$STATE/final"; exit 1; fi
+    # 지연이 기대대로 걸리지 않았으면 이 회차를 재지 않고 멈춘다
+    if ! container_rtt_check; then
+      write_conditions failed-rtt-check; touch "$STATE/final"
+      die "왕복 시간이 기대(${DELAY}ms 더함)와 맞지 않아 측정을 시작하지 않는다 — $ROUND_DIR/conditions.json"
+    fi
+  else
+    start_server dataServer "$DATA_JAR" "$ROUND_DIR/dataServer.log"
+    DATA_PID=${STARTED_PIDS[-1]}
+    if ! wait_ready "$DATA_PID" "$ROUND_DIR/dataServer.log" data_ready; then write_conditions failed-start; touch "$STATE/final"; exit 1; fi
+    start_server apiServer "$API_JAR" "$ROUND_DIR/apiServer.log"
+    API_PID=${STARTED_PIDS[-1]}
+    if ! wait_ready "$API_PID" "$ROUND_DIR/apiServer.log" api_ready; then write_conditions failed-start; touch "$STATE/final"; exit 1; fi
+  fi
   grep -h '^BENCH_CONFIG' "$ROUND_DIR/dataServer.log" "$ROUND_DIR/apiServer.log" > "$STATE/bench_config"
   write_conditions running
 

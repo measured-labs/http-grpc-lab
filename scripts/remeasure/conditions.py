@@ -61,6 +61,30 @@ def judge(round_dir: Path, m: dict):
     return m
 
 
+def container_info(state: Path, env):
+    """컨테이너 방식(--delay)일 때의 구성과 측정 전 왕복 확인. 호스트 직접 실행이면 None."""
+    if env.get("CONTAINER") != "1":
+        return None
+    rtt = read(state, "rtt_check.json")
+    delay = int(env["DELAY"])
+    return {
+        "composeProject": env.get("COMPOSE_PROJECT"), "composeFile": "docker-compose.remeasure.yml",
+        "delayMs": delay,
+        "delayMeaning": f"dataServer 컨테이너의 eth0에서 나가는 패킷(dataServer → apiServer 방향)에만 tc netem delay {delay}ms. "
+                        f"apiServer → dataServer 방향은 지연 없음. 왕복(요청 하나의 왕복, TCP 핸드셰이크 한 번)에 {delay}ms가 더해진다. "
+                        "k6 → apiServer 구간에는 걸리지 않는다",
+        "netemQdisc": read(state, "qdisc"),
+        "rttCheck": json.loads(rtt) if rtt else None,
+        "image": env.get("IMAGE_TAG"), "imageId": env.get("IMAGE_ID"), "baseImage": env.get("BASE_IMAGE"),
+        "jdkInImage": env.get("CONTAINER_JDK"),
+        "docker": env.get("DOCKER_VERSION"), "compose": env.get("COMPOSE_VERSION"),
+        "network": "compose 기본 브리지 네트워크(rm-http-grpc_default). apiServer는 dataServer를 서비스 이름으로 부른다",
+        "ports": "호스트에는 apiServer 8080만 127.0.0.1로 연다(docker 포트 전달). dataServer 포트는 열지 않는다",
+        "limits": "CPU·메모리 제한 없음. dataServer는 NET_ADMIN 권한만 더함(privileged 아님)",
+        "jars": "호스트에서 빌드한 jar를 읽기 전용으로 붙인다(jars 항목과 같은 파일)",
+    }
+
+
 def main():
     state, round_dir = Path(sys.argv[1]), Path(sys.argv[2])
     env = os.environ
@@ -102,6 +126,9 @@ def main():
         "onlyConditions": [x for x in env.get("ONLY_CONDITIONS", "").split(",") if x] or None,
         "jdk": env["JDK"], "k6": env["K6V"], "cores": int(env["CORES"]), "cpuModel": env["CPU_MODEL"],
         "machine": "k6와 두 서버(apiServer, dataServer)가 같은 머신에서 돈다",
+        # host-jar = 호스트에서 java -jar로 직접 · docker-compose = 두 서버를 컨테이너로(--delay)
+        "execution": "docker-compose" if env.get("CONTAINER") == "1" else "host-jar",
+        "container": container_info(state, env),
         "benchConfig": lines(state, "bench_config"),
         "conditions": conditions,
         "pathOrder": lines(state, "order"),
