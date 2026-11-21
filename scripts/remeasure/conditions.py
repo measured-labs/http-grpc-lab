@@ -85,6 +85,24 @@ def container_info(state: Path, env):
     }
 
 
+def other_containers(state: Path):
+    """회차 시작 때 이 머신에서 돌던 컨테이너 수와 compose 프로젝트 이름별 수(run.sh의 record_other_containers)."""
+    v = lines(state, "other_containers")
+    if not v:
+        return None
+    if v[0].startswith("error"):
+        return {"error": v[0].removeprefix("error").strip()}
+    projects, no_label = {}, 0
+    for row in v[1:]:
+        name, _, n = row.rpartition("\t")
+        if name:
+            projects[name] = int(n)
+        else:
+            no_label = int(n)
+    return {"running": int(v[0]), "composeProjects": projects, "withoutComposeProject": no_label,
+            "note": "회차 시작 때(이 회차의 서버를 띄우기 전) docker ps — 이름과 수만 적는다"}
+
+
 def main():
     state, round_dir = Path(sys.argv[1]), Path(sys.argv[2])
     env = os.environ
@@ -124,6 +142,8 @@ def main():
         # true = 추적 파일에 커밋하지 않은 변경(docs/plans/ 제외)이 있어도 시작하게 했다(--allow-dirty)
         "allowDirty": env.get("ALLOW_DIRTY") == "1",
         "onlyConditions": [x for x in env.get("ONLY_CONDITIONS", "").split(",") if x] or None,
+        # 값이 있으면 이 실행은 그 회차 하나만 돌았다(--only-round — 지연을 회차마다 번갈아 잴 때)
+        "onlyRound": int(env["ONLY_ROUND"]) if env.get("ONLY_ROUND") else None,
         "jdk": env["JDK"], "k6": env["K6V"], "cores": int(env["CORES"]), "cpuModel": env["CPU_MODEL"],
         "machine": "k6와 두 서버(apiServer, dataServer)가 같은 머신에서 돈다",
         # host-jar = 호스트에서 java -jar로 직접 · docker-compose = 두 서버를 컨테이너로(--delay)
@@ -147,6 +167,7 @@ def main():
             "checkIntervalSeconds": int(env["LOAD_CHECK_INTERVAL"]),
         },
         "topProcessesBefore": lines(state, "top_before"),
+        "otherContainers": other_containers(state),
         "warmup": {
             "iterationsPerTarget": int(env["WARMUP"]), "vus": int(env["WARMUP_VUS"]),
             "targets": (read(state, "warmup_targets") or "").split(",") if read(state, "warmup_targets") else [],

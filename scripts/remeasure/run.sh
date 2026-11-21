@@ -7,6 +7,7 @@ usage() {
   cat <<'EOF'
 사용: scripts/remeasure/run.sh --axis size|concurrency|complexity --config default|matched [옵션]
   --rounds N         반복 횟수 (기본 5)               [ROUNDS]
+  --only-round N     회차 N 하나만 돈다(폴더 roundN, 경로 순서는 N 기준). 1 ≤ N ≤ 반복 횟수 [ONLY_ROUND]
   --duration D       측정 한 번의 길이 (기본 30s)     [DURATION]
   --label NAME       결과 이름표 (기본 nodelay, --delay X 이면 delayXms) [LABEL]
   --delay MS         두 서버를 컨테이너로 띄우고 dataServer에서 나가는 쪽에 MS 밀리초 지연(0|1|10) [DELAY]
@@ -16,6 +17,7 @@ usage() {
                      넘으면 멈추지 않고 시작하고 conditions.json에 적는다
   --conditions A,B   축의 조건 중 일부만 (기본 전체 — 본 측정은 전체) [ONLY_CONDITIONS]
   --no-build         시작할 때 ./gradlew bootJar를 돌리지 않는다(있는 jar로 잰다)
+                     --delay면 이미지도 만들지 않는다(있는 rm-http-grpc/jre21-nettools:1로 잰다)
   --allow-dirty      추적 파일에 커밋하지 않은 변경이 있어도 시작한다(conditions.json에 표시)
   --warmup N         워밍업: 조건 × 경로마다 부를 횟수 (기본 200) [WARMUP]
   --warmup-vus N     워밍업의 동시 사용자 수 (기본 10) [WARMUP_VUS]
@@ -28,6 +30,7 @@ AXIS="${AXIS:-}"; CONFIG="${CONFIG:-}"
 ROUNDS="${ROUNDS:-5}"; DURATION="${DURATION:-30s}"; LABEL="${LABEL:-}"; DELAY="${DELAY:-}"
 MAX_LOAD="${MAX_LOAD:-4.0}"; WARMUP="${WARMUP:-200}"; WARMUP_VUS="${WARMUP_VUS:-10}"; PAUSE="${PAUSE:-3}"
 MAX_WAIT="${MAX_WAIT:-600}"; ONLY_CONDITIONS="${ONLY_CONDITIONS:-}"; BUILD=1; ALLOW_DIRTY=0
+ONLY_ROUND="${ONLY_ROUND:-}"
 LOAD_CHECK_INTERVAL=10
 
 while [ $# -gt 0 ]; do
@@ -35,6 +38,7 @@ while [ $# -gt 0 ]; do
     --axis) AXIS="$2"; shift 2 ;;
     --config) CONFIG="$2"; shift 2 ;;
     --rounds) ROUNDS="$2"; shift 2 ;;
+    --only-round) ONLY_ROUND="$2"; shift 2 ;;
     --duration) DURATION="$2"; shift 2 ;;
     --label) LABEL="$2"; shift 2 ;;
     --delay) DELAY="$2"; shift 2 ;;
@@ -55,6 +59,12 @@ die() { echo "중단: $*" >&2; exit 1; }
 
 case "$CONFIG" in default|matched) ;; *) usage >&2; die "설정은 default 또는 matched";; esac
 [[ "$ROUNDS" =~ ^[1-9][0-9]*$ ]] || die "반복 횟수가 잘못됨: $ROUNDS"
+if [ -n "$ONLY_ROUND" ]; then
+  [[ "$ONLY_ROUND" =~ ^[1-9][0-9]*$ ]] && [ "$ONLY_ROUND" -le "$ROUNDS" ] || die "--only-round는 1~$ROUNDS: $ONLY_ROUND"
+  ROUND_LIST=("$ONLY_ROUND")
+else
+  ROUND_LIST=($(seq 1 "$ROUNDS"))
+fi
 # --delay: 있으면 컨테이너 방식(CONTAINER=1)
 CONTAINER=0
 if [ -n "$DELAY" ]; then
@@ -141,7 +151,7 @@ if above "$L" "$(awk -v m="$MAX_LOAD" 'BEGIN{print m*3}')"; then
   ps -eo pid,pcpu,etime,comm --sort=-pcpu | head -8
 fi
 
-for r in $(seq 1 "$ROUNDS"); do
+for r in "${ROUND_LIST[@]}"; do
   [ -e "$OUT/round$r" ] && die "이미 있다: $OUT/round$r (덮어쓰지 않는다 — 다른 이름표를 쓰거나 직접 옮긴다)"
 done
 
@@ -156,10 +166,12 @@ fi
 
 # 컨테이너 방식: 이미지(JDK 21 런타임 + tc, ping)를 만든다. jar는 이미지에 넣지 않고 compose가 읽기 전용으로 붙인다.
 if [ "$CONTAINER" -eq 1 ]; then
-  echo "이미지: docker compose build (rm-http-grpc/jre21-nettools:1)"
-  dc build -q || die "이미지를 만들지 못했다"
   IMAGE_TAG="rm-http-grpc/jre21-nettools:1"
-  IMAGE_ID="$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')"
+  if [ "$BUILD" -eq 1 ]; then
+    echo "이미지: docker compose build ($IMAGE_TAG)"
+    dc build -q || die "이미지를 만들지 못했다"
+  fi
+  IMAGE_ID="$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')" || die "이미지가 없다: $IMAGE_TAG (--no-build를 빼고 돌린다)"
   BASE_IMAGE="eclipse-temurin:21-jre $(docker image inspect eclipse-temurin:21-jre --format '{{index .RepoDigests 0}} {{.Id}}' 2>/dev/null)"
   DOCKER_VERSION="$(docker version --format 'server {{.Server.Version}} client {{.Client.Version}}')"
   COMPOSE_VERSION="$(docker compose version --short)"
@@ -181,7 +193,7 @@ CPU_MODEL="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')
 # jar가 커밋과 따로 빌드될 수 있으므로 jar 자체를 식별할 값도 남긴다
 JARS="$(for j in "$DATA_JAR" "$API_JAR"; do echo "$(basename "$j") sha256=$(sha256sum "$j" | cut -c1-16) built=$(date -Iseconds -r "$j")"; done)"
 export JARS COMMIT TRACKED_DIRTY JDK K6V CORES CPU_MODEL AXIS CONFIG DURATION WARMUP WARMUP_VUS PAUSE ROUNDS LABEL MAX_LOAD
-export MAX_WAIT LOAD_CHECK_INTERVAL BUILD ALLOW_DIRTY ONLY_CONDITIONS CONTAINER DELAY COMPOSE_PROJECT
+export MAX_WAIT LOAD_CHECK_INTERVAL BUILD ALLOW_DIRTY ONLY_CONDITIONS CONTAINER DELAY COMPOSE_PROJECT ONLY_ROUND
 
 # ---------- 서버와 정리 ----------
 STARTED_PIDS=()
@@ -315,6 +327,18 @@ container_rtt_check() {
     "$STATE/qdisc" "$rq" "$rp" "$rt"
 }
 
+# 회차 시작 때 이 머신에서 돌고 있는 컨테이너 수와 compose 프로젝트 이름별 수(읽기만 한다). 결과: $STATE/other_containers
+# 첫 줄 = 전체 수, 그 뒤 "프로젝트<TAB>수"(compose 라벨이 없으면 빈 이름). docker를 못 쓰면 "error <이유>".
+record_other_containers() {
+  local out
+  if ! command -v docker >/dev/null; then echo "error docker 없음" > "$STATE/other_containers"; return 0; fi
+  # 줄마다 "c "를 붙여 compose 라벨이 없는 컨테이너도 한 줄로 센다
+  if ! out="$(timeout 20 docker ps --format 'c {{.Label "com.docker.compose.project"}}' </dev/null 2>/dev/null)"; then
+    echo "error docker ps 실패" > "$STATE/other_containers"; return 0
+  fi
+  { grep -c '^c ' <<< "$out"; grep '^c ' <<< "$out" | sed 's/^c //' | sort | uniq -c | awk '{n=$1; sub(/^ *[0-9]+ /,""); print $0 "\t" n}'; } \
+    > "$STATE/other_containers"
+}
 
 run_k6() {  # $1=요약 JSON $2=k6 출력 로그, 나머지 = -e 인자들. 종료 코드를 돌려준다
   local summary="$1" log="$2"; shift 2
@@ -355,9 +379,10 @@ wait_for_load() {
   done
 }
 
-for r in $(seq 1 "$ROUNDS"); do
+for r in "${ROUND_LIST[@]}"; do
   STATE="$STATE_ROOT/round$r"; mkdir -p "$STATE"
   wait_for_load
+  record_other_containers
   b="$(busy_ports)"; [ -z "$b" ] || die "회차 $r 시작 전에 포트가 쓰이고 있다: $b"
   mkdir "$OUT/round$r" || die "회차 폴더를 만들 수 없다: $OUT/round$r"
   ROUND_DIR="$OUT/round$r"

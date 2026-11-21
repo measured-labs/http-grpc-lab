@@ -127,6 +127,33 @@ def main():
         after = [c["load1After"] for c in conds_meta if c.get("load1After") is not None]
         w(f"- 1분 부하 평균: 시작 전 {min(before):.2f}~{max(before):.2f}, 끝난 뒤 "
           + (f"{min(after):.2f}~{max(after):.2f}" if after else "—"))
+    # 실행 방식과 컨테이너 조건 (호스트 직접 실행의 원자료에는 container·otherContainers가 없다)
+    def varies(vals):
+        return " (회차마다 다름 — 확인 필요)" if len(vals) > 1 else ""
+    execs = sorted({c.get("execution") or "host-jar" for c in conds_meta})
+    w(f"- 실행 방식: {', '.join(execs)}{varies(execs)}")
+    ctrs = [c for c in conds_meta if c.get("container")]
+    if ctrs:
+        delays = sorted({str(c["container"].get("delayMs")) for c in ctrs})
+        w(f"- 지연: {', '.join(d + 'ms' for d in delays)}{varies(delays)} — {ctrs[0]['container'].get('delayMeaning')}")
+        w("- 왕복 확인(ping 중앙값, 회차별): " + " · ".join(
+            f"r{c['round']} {fmt(((c['container'].get('rttCheck') or {}).get('ping') or {}).get('medianMs'), 3)}ms"
+            for c in ctrs))
+        ids = sorted({str(c["container"].get("imageId")) for c in ctrs})
+        jdks = sorted({str(c["container"].get("jdkInImage")) for c in ctrs})
+        w(f"- 이미지 id: {', '.join(ids)}{varies(ids)} · 이미지의 JDK: {', '.join(jdks)}{varies(jdks)}")
+
+    def others(c):
+        o = c.get("otherContainers")
+        if not o:
+            return "기록 없음"
+        if "error" in o:
+            return f"못 읽음({o['error']})"
+        names = [f"{k} {v}" for k, v in sorted(o.get("composeProjects", {}).items())]
+        if o.get("withoutComposeProject"):
+            names.append(f"compose 아님 {o['withoutComposeProject']}")
+        return f"{o.get('running')}" + (f" ({', '.join(names)})" if names else "")
+    w("- 다른 컨테이너(회차 시작 때 실행 중인 수, 회차별): " + " · ".join(f"r{c['round']} {others(c)}" for c in conds_meta))
     statuses = {c["round"]: c.get("status") for c in conds_meta}
     if any(s != "complete" for s in statuses.values()):
         warn.append(f"끝나지 않은 회차: {[r for r, s in statuses.items() if s != 'complete']} ({statuses})")
