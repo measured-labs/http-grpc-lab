@@ -39,13 +39,14 @@ HTTP vs gRPC 프로토콜 성능 비교 벤치마크 프로젝트
 | 조건 | 고를 것 | 근거 (조건 · 반복 · 범위) | 표 |
 |------|---------|--------------------------|----|
 | 바이트 덩어리를 보냄, 100KB 이상 | `http-bytes` | 동시 10, 호스트, 5/5 1위. 1MB에서 1,429 [1,424~1,434] 대 `http-proto` 1,251, `grpc-unary` 689, `http-json` 277 | `tables/size-nodelay.md` |
-| 바이트를 JSON에 담아 보냄 | 쓰지 않는다 | 동시 10, 5/5. `http-proto`가 10KB에서 20.0%, 1MB에서 4.5배 높다 | `tables/size-nodelay.md` |
-| 구조가 있는 데이터(복잡도 다섯 단계) | Protobuf (`http-proto`와 `grpc-unary`는 차이 없음) | 동시 10, 1위가 회차마다 바뀜. `http-json`보다 10.0%(complex)~141%(extreme) 높다. 회차 1·3은 부하 기준을 넘은 채 시작 | `tables/complexity-nodelay.md` |
-| 10KB, 동시 10, 지연 없음 | `grpc-unary` (폭은 작다) | 5/5. 4,862 [4,846~4,908] 대 `http-proto` 4,508(+7.8%) | `tables/size-nodelay.md` |
+| 바이트를 JSON에 담아 보냄 | 쓰지 않는다 | 동시 10, 호스트, 10KB 이상에서 `http-proto`가 5/5로 앞선다. 10KB에서 20.0%(4,508 [4,495~4,557] 대 3,758 [3,738~3,792]), 1MB에서 4.5배(1,251 [1,251~1,255] 대 277 [273~280]) | `tables/size-nodelay.md` |
+| 구조가 있는 데이터, medium~extreme | Protobuf (`http-proto`와 `grpc-unary`는 차이 없음) | 동시 10, 호스트. `http-proto`가 `http-json`을 5/5로 앞선다: 10.0%(complex)~141.3%(extreme). 두 Protobuf 경로끼리는 1위가 회차마다 바뀜. 다섯 회차 중 1·3은 부하 기준(4.0)을 넘은 채(14.58, 11.09) 시작해 범위가 넓다 | `tables/complexity-nodelay.md` |
+| 구조가 있는 데이터, simple(필드 몇 개) | 차이 없음 | 동시 10, 호스트. 1위가 `http-proto` 3회, `http-json` 2회 | `tables/complexity-nodelay.md` |
+| 10KB, 동시 10, 지연 없음 | 차이 없음에 가깝다 (잰 때에 따라 다름) | 크기 축에서는 `grpc-unary` 5/5: 4,862 [4,846~4,908] 대 `http-proto` 4,508 [4,495~4,557](+7.8%). 같은 조건을 다른 시간대에 잰 동시 사용자 축에서는 `grpc-unary`가 1위인 회차가 없다(기본 설정 4,129 [3,217~4,241] 대 4,398 [3,572~4,533]) | `tables/size-nodelay.md`, `tables/concurrency-default-nodelay.md` |
 | 1KB, 50KB, 동시 10 | 차이 없음 | `http-proto`·`http-bytes`·`grpc-unary`가 3.1% 안, 1위가 회차마다 바뀜 | `tables/size-nodelay.md` |
-| 동시 사용자 10~500 (10KB) | 차이 없음 (처리량) | 기본 설정과 맞춘 설정 모두 1위가 회차마다 바뀜. 맞춘 설정의 동시 500만 HTTP 쪽 5/5(`grpc-unary` −11.1%, 범위는 겹침). p95는 동시 100~200에서 `grpc-unary`가 가장 낮은 회차가 4/5~5/5 | `tables/concurrency-*-nodelay.md` |
-| 두 서버 사이 왕복 +1ms, 10KB~100KB | `grpc-unary` | 컨테이너, 5/5, `http-proto`보다 5.8~8.2% 높다(100KB 2,671 대 2,472). 200KB는 차이 없음, 500KB 이상은 `http-bytes` | `tables/size-delay1ms.md` |
-| 두 서버 사이 왕복 +10ms, 동시 10 | 차이 없음(1KB~100KB), 1MB는 `http-bytes` | 닫힌 부하라 처리량이 지연에 따라 정해진다(1KB 약 750). 1MB는 5/5, 466 대 `grpc-unary` 303 | `tables/size-delay10ms.md` |
+| 동시 사용자 10~500 (10KB) | 차이 없음 (처리량). `grpc-unary`가 앞서는 구간은 없다 | 호스트, 기본 설정과 맞춘 설정 모두 1위 경로가 회차마다 바뀜. 동시 10과 500(두 설정), 맞춘 설정의 동시 50에서는 `grpc-unary`가 1위인 회차가 없고 `http-proto`보다 4.5~19.6% 낮다(범위는 겹침). 동시 100~200에서는 세 경로가 엇갈린다. p95는 동시 100~200에서 `grpc-unary`가 가장 낮은 회차가 4/5~5/5 | `tables/concurrency-*-nodelay.md` |
+| 두 서버 사이 왕복 +1ms, 10KB~100KB, 동시 10 | `grpc-unary` | 컨테이너, 5/5, `http-proto`보다 5.8~8.2% 높다(100KB 2,671 [2,613~2,695] 대 2,472 [2,462~2,485]). 1KB와 200KB는 차이 없음, 500KB 이상은 `http-bytes` 5/5 | `tables/size-delay1ms.md` |
+| 두 서버 사이 왕복 +10ms, 동시 10 | 500KB까지는 경로 사이가 6% 안(`http-json` 제외), 1MB는 `http-bytes` | 컨테이너. 닫힌 부하라 처리량이 지연에 따라 정해진다(1KB에서 네 경로 737~754). 5/5인 조건도 폭이 작다: 1KB `http-proto`(754 대 749), 200KB `grpc-unary`(689 [679~718] 대 `http-bytes` 668 [665~675]). 10KB·50KB·100KB·500KB는 1위가 바뀜. 1MB는 `http-bytes` 5/5, 466 [456~472] 대 `grpc-unary` 303 [300~307] | `tables/size-delay10ms.md` |
 | 실시간 양방향, 스트림 | 이번 측정 밖 | 스트림과 TLS는 따로 잰다 | 해당 없음 |
 
 `tables/`는 `docs/remeasure/tables/`다. 지연 조건은 두 서버를 컨테이너로 띄우고 dataServer에서 나가는 쪽에만 지연을 건 것이라 왕복에 그만큼 더해진다. 지연의 효과는 같은 구성의 지연 0과만 견준다(`docs/remeasure/RESULT.md` "지연 조건").
@@ -55,9 +56,9 @@ HTTP vs gRPC 프로토콜 성능 비교 벤치마크 프로젝트
 | 기준 | 다시 잰 결과 | 예전 결론 (2026-01) |
 |------|-------------|---------------------|
 | 페이로드 크기 (동시 10, 지연 없음) | 10KB는 `grpc-unary` 5/5, 50KB는 차이 없음, 100KB부터 `http-bytes` 5/5(`grpc-unary`는 `http-proto`보다 100KB −7.2%, 1MB −45.0%) | 100~200KB에서 역전 |
-| 페이로드 크기 (왕복 +1ms) | 100KB까지 `grpc-unary` 5/5, 200KB 차이 없음, 500KB부터 `http-bytes` 5/5 | 잰 적 없음 |
-| 동시 사용자 (10KB) | 역전 없음 — 10~500 모두 처리량은 차이 없음 | 100~200 VU에서 역전 |
-| 데이터 복잡도 | 역전 없음 — 다섯 단계 모두 Protobuf 두 경로는 차이 없음, `http-json`만 낮다 | ~150 필드에서 역전 |
+| 페이로드 크기 (왕복 +1ms) | 1KB 차이 없음, 10KB~100KB `grpc-unary` 5/5, 200KB 차이 없음, 500KB부터 `http-bytes` 5/5 | 잰 적 없음 |
+| 동시 사용자 (10KB) | 역전 없음 — 10~500 모두 처리량의 1위가 회차마다 바뀌고, `grpc-unary`가 앞서는 구간은 없다 | 100~200 VU에서 역전 |
+| 데이터 복잡도 | 역전 없음 — 다섯 단계 모두 Protobuf 두 경로는 차이 없음. `http-json`은 medium부터 5/5로 낮고 simple에서는 차이 없음 | ~150 필드에서 역전 |
 
 큰 응답에서 `grpc-unary`가 느린 것은 직렬화 때문이 아니다. 같은 메시지를 HTTP/1.1로 보내는 `http-proto`는 `http-bytes`와 3~12.5% 차이다. gRPC 전송 구간 안의 무엇 때문인지는 확인하지 못했다(`docs/remeasure/RESULT.md` "확인하지 못한 것").
 
