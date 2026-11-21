@@ -17,41 +17,41 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
 /**
- * gRPC 서버의 실행기
+ * gRPC 서비스 코루틴의 디스패처
  *
  * 측정 설정(`bench.max-concurrency`, 프로파일 `matched`에서 `BENCH_MAX_CONCURRENCY`로 정함)이
- * - 없으면(`default`): 아무것도 바꾸지 않는다. grpc-java 기본 실행기(상한 없는 캐시 스레드 풀)와
- *   grpc-kotlin 기본 디스패처(`Dispatchers.Default`, 코어 수만큼)를 쓴다.
- * - 있으면(`matched`): 그 수만큼의 고정 스레드 풀을 gRPC 서버 실행기와 서비스 코루틴의 디스패처로 같이 쓴다.
+ * - 없으면(`default`): 아무것도 바꾸지 않는다. grpc-kotlin 기본 디스패처(`Dispatchers.Default`, 코어 수만큼)를 쓴다.
+ * - 있으면(`matched`): 그 수만큼의 고정 스레드 풀에서 서비스 코루틴(요청 처리)을 돌린다.
  *   Tomcat 최대 스레드와 같은 수의 스레드가 요청을 처리한다.
+ *
+ * gRPC 서버 실행기(전송 콜백이 도는 곳)는 두 설정 모두 grpc-java 기본값(상한 없는 캐시 스레드 풀)이다.
+ * 서버 실행기까지 이 고정 풀로 두면 쉬는 스레드 수백 개가 큐의 락 하나를 두고 다퉈 gRPC만 크게 느려졌다
+ * (docs/remeasure/PATHS.md, results/2026-11/nodelay/concurrency-matched-v1-fixed-executor/).
  */
 @Component
-class GrpcServerExecutor(
+class GrpcHandlerDispatcher(
     @Value("\${bench.max-concurrency:#{null}}") val maxConcurrency: Int?
 ) {
-    val executor: ThreadPoolExecutor? = maxConcurrency?.let { n ->
+    /** 서비스 코루틴이 도는 고정 스레드 풀 — `matched`에서만 있다 */
+    val handlerExecutor: ThreadPoolExecutor? = maxConcurrency?.let { n ->
         val seq = AtomicInteger()
         ThreadPoolExecutor(n, n, 60, TimeUnit.SECONDS, LinkedBlockingQueue()) { r ->
             Thread(r, "grpc-bench-${seq.incrementAndGet()}").apply { isDaemon = true }
         }.apply { allowCoreThreadTimeOut(true) }
     }
 
-    /** gRPC 서비스(코루틴)가 도는 곳 — `matched`면 [executor], 아니면 grpc-kotlin 기본값 */
-    val coroutineContext: CoroutineContext = executor?.asCoroutineDispatcher() ?: EmptyCoroutineContext
+    /** gRPC 서비스(코루틴)가 도는 곳 — `matched`면 [handlerExecutor], 아니면 grpc-kotlin 기본값 */
+    val coroutineContext: CoroutineContext = handlerExecutor?.asCoroutineDispatcher() ?: EmptyCoroutineContext
 
     fun describe(): String {
-        val e = executor
-        return if (e == null) {
-            "grpcServerExecutor=grpc-default(cached,unbounded) " +
-                "grpcHandlerDispatcher=Dispatchers.Default(${Runtime.getRuntime().availableProcessors()})"
-        } else {
-            "grpcServerExecutor=fixed(${e.maximumPoolSize}) grpcHandlerDispatcher=grpcServerExecutor"
-        }
+        val handler = handlerExecutor?.let { "fixed(${it.maximumPoolSize})" }
+            ?: "Dispatchers.Default(${Runtime.getRuntime().availableProcessors()})"
+        return "grpcServerExecutor=grpc-default(cached,unbounded) grpcHandlerDispatcher=$handler"
     }
 
     @PreDestroy
     fun shutdown() {
-        (executor as ExecutorService?)?.shutdown()
+        (handlerExecutor as ExecutorService?)?.shutdown()
     }
 }
 
@@ -60,7 +60,7 @@ class GrpcServerExecutor(
  */
 @Component
 class BenchConfigLogger(
-    private val grpcServerExecutor: GrpcServerExecutor
+    private val grpcHandlerDispatcher: GrpcHandlerDispatcher
 ) {
     @EventListener
     fun onReady(event: ApplicationReadyEvent) {
@@ -69,13 +69,13 @@ class BenchConfigLogger(
         val webCtx = ctx as? ServletWebServerApplicationContext
         val tomcatMaxThreads = webCtx?.let { tomcatMaxThreads(it) }
         val keepAlive = webCtx?.let { tomcatKeepAlive(it) }
-        // read: 실행 중인 객체에서 읽은 값 · set: 직접 만든 실행기의 값(grpc-java는 실행기를 밖으로 내주지 않는다)
+        // read: 실행 중인 객체에서 읽은 값 · set: 코드에서 정한 값(grpc-java는 실행기를 밖으로 내주지 않는다)
         println(
             "BENCH_CONFIG server=dataServer profile=$profiles " +
                 "read: tomcatMaxThreads=${tomcatMaxThreads ?: "unknown"} " +
                 "tomcatMaxKeepAliveRequests=${keepAlive?.maxKeepAliveRequests ?: "unknown"} " +
                 "tomcatKeepAliveTimeoutMs=${keepAlive?.keepAliveTimeoutMs ?: "unknown"} " +
-                "| set: ${grpcServerExecutor.describe()}"
+                "| set: ${grpcHandlerDispatcher.describe()}"
         )
     }
 

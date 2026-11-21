@@ -18,7 +18,6 @@ import java.util.concurrent.TimeUnit
 @Configuration
 class GrpcServerConfig(
     private val grpcDataService: GrpcDataService,
-    private val grpcServerExecutor: GrpcServerExecutor,
     @Value("\${grpc.server.port:9091}") private val grpcPort: Int
 ) {
     private lateinit var server: Server
@@ -30,13 +29,13 @@ class GrpcServerConfig(
      */
     @PostConstruct
     fun start() {
-        val builder = ServerBuilder
+        // 서버 실행기는 두 설정 모두 grpc-java 기본값이다(matched는 서비스 코루틴의 디스패처만 바꾼다 — GrpcHandlerDispatcher)
+        server = ServerBuilder
             .forPort(grpcPort)
             .addService(grpcDataService)
             .maxInboundMessageSize(10 * 1024 * 1024)
-        // matched 설정일 때만 실행기를 정한다(default는 grpc-java 기본값 그대로)
-        grpcServerExecutor.executor?.let { builder.executor(it) }
-        server = builder.build().start()
+            .build()
+            .start()
 
         println("✅ gRPC Server started on port ${server.port}")
 

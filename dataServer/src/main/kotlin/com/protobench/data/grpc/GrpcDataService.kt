@@ -1,6 +1,6 @@
 package com.protobench.data.grpc
 
-import com.protobench.data.config.GrpcServerExecutor
+import com.protobench.data.config.GrpcHandlerDispatcher
 import com.protobench.data.service.*
 import com.protobench.proto.*
 import com.google.protobuf.ByteString
@@ -23,8 +23,8 @@ import org.springframework.stereotype.Service
 class GrpcDataService(
     private val dataService: DataService,
     private val complexDataProtoBuilder: ComplexDataProtoBuilder,
-    grpcServerExecutor: GrpcServerExecutor = GrpcServerExecutor(null)
-) : DataServiceGrpcKt.DataServiceCoroutineImplBase(grpcServerExecutor.coroutineContext) {
+    grpcHandlerDispatcher: GrpcHandlerDispatcher = GrpcHandlerDispatcher(null)
+) : DataServiceGrpcKt.DataServiceCoroutineImplBase(grpcHandlerDispatcher.coroutineContext) {
 
     /**
      * Unary RPC: 단일 요청 → 단일 응답
