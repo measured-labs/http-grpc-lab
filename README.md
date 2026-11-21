@@ -29,7 +29,43 @@ HTTP vs gRPC 프로토콜 성능 비교 벤치마크 프로젝트
 
 ## 📊 전체 벤치마크 결과 요약
 
-### 프로토콜 선택 가이드
+> 2026-11-21~22에 같은 조건으로 5회씩 다시 쟀다. 아래 가이드와 역전 지점은 다시 잰 결과다. 근거 표와 측정 조건은 [`docs/remeasure/RESULT.md`](docs/remeasure/RESULT.md), 원자료는 `results/2026-11/`, 표를 다시 만드는 명령은 `scripts/remeasure/make-tables.sh`다.
+> 2026-01의 가이드는 이 절 끝의 "예전 가이드"에 그대로 두었다. 그 수치의 불일치는 [`docs/remeasure/ERRATA.md`](docs/remeasure/ERRATA.md)에 있다.
+
+### 프로토콜 선택 가이드 (2026-11 다시 재기)
+
+조건은 모두 한 머신(24코어)의 k6 → apiServer → dataServer, 평문, 서버당 인스턴스 하나, 조건마다 5회 × 30초다. 값은 처리량(req/s) 중앙값이고 대괄호는 5회의 최소~최대다. "5/5"는 다섯 회차 모두 그 경로가 1위였다는 뜻이고, 1위가 회차마다 바뀐 조건은 "차이 없음"으로 적었다. 경로는 `http-json`(JSON + Base64, HTTP/1.1), `http-bytes`(원시 바이트, HTTP/1.1), `http-proto`(Protobuf, HTTP/1.1), `grpc-unary`(같은 Protobuf, gRPC)다.
+
+| 조건 | 고를 것 | 근거 (조건 · 반복 · 범위) | 표 |
+|------|---------|--------------------------|----|
+| 바이트 덩어리를 보냄, 100KB 이상 | `http-bytes` | 동시 10, 호스트, 5/5 1위. 1MB에서 1,429 [1,424~1,434] 대 `http-proto` 1,251, `grpc-unary` 689, `http-json` 277 | `tables/size-nodelay.md` |
+| 바이트를 JSON에 담아 보냄 | 쓰지 않는다 | 동시 10, 5/5. `http-proto`가 10KB에서 20.0%, 1MB에서 4.5배 높다 | `tables/size-nodelay.md` |
+| 구조가 있는 데이터(복잡도 다섯 단계) | Protobuf (`http-proto`와 `grpc-unary`는 차이 없음) | 동시 10, 1위가 회차마다 바뀜. `http-json`보다 10.0%(complex)~141%(extreme) 높다. 회차 1·3은 부하 기준을 넘은 채 시작 | `tables/complexity-nodelay.md` |
+| 10KB, 동시 10, 지연 없음 | `grpc-unary` (폭은 작다) | 5/5. 4,862 [4,846~4,908] 대 `http-proto` 4,508(+7.8%) | `tables/size-nodelay.md` |
+| 1KB, 50KB, 동시 10 | 차이 없음 | `http-proto`·`http-bytes`·`grpc-unary`가 3.1% 안, 1위가 회차마다 바뀜 | `tables/size-nodelay.md` |
+| 동시 사용자 10~500 (10KB) | 차이 없음 (처리량) | 기본 설정과 맞춘 설정 모두 1위가 회차마다 바뀜. 맞춘 설정의 동시 500만 HTTP 쪽 5/5(`grpc-unary` −11.1%, 범위는 겹침). p95는 동시 100~200에서 `grpc-unary`가 가장 낮은 회차가 4/5~5/5 | `tables/concurrency-*-nodelay.md` |
+| 두 서버 사이 왕복 +1ms, 10KB~100KB | `grpc-unary` | 컨테이너, 5/5, `http-proto`보다 5.8~8.2% 높다(100KB 2,671 대 2,472). 200KB는 차이 없음, 500KB 이상은 `http-bytes` | `tables/size-delay1ms.md` |
+| 두 서버 사이 왕복 +10ms, 동시 10 | 차이 없음(1KB~100KB), 1MB는 `http-bytes` | 닫힌 부하라 처리량이 지연에 따라 정해진다(1KB 약 750). 1MB는 5/5, 466 대 `grpc-unary` 303 | `tables/size-delay10ms.md` |
+| 실시간 양방향, 스트림 | 이번 측정 밖 | 스트림과 TLS는 따로 잰다 | 해당 없음 |
+
+`tables/`는 `docs/remeasure/tables/`다. 지연 조건은 두 서버를 컨테이너로 띄우고 dataServer에서 나가는 쪽에만 지연을 건 것이라 왕복에 그만큼 더해진다. 지연의 효과는 같은 구성의 지연 0과만 견준다(`docs/remeasure/RESULT.md` "지연 조건").
+
+### 역전 지점 (2026-11 다시 재기)
+
+| 기준 | 다시 잰 결과 | 예전 결론 (2026-01) |
+|------|-------------|---------------------|
+| 페이로드 크기 (동시 10, 지연 없음) | 10KB는 `grpc-unary` 5/5, 50KB는 차이 없음, 100KB부터 `http-bytes` 5/5(`grpc-unary`는 `http-proto`보다 100KB −7.2%, 1MB −45.0%) | 100~200KB에서 역전 |
+| 페이로드 크기 (왕복 +1ms) | 100KB까지 `grpc-unary` 5/5, 200KB 차이 없음, 500KB부터 `http-bytes` 5/5 | 잰 적 없음 |
+| 동시 사용자 (10KB) | 역전 없음 — 10~500 모두 처리량은 차이 없음 | 100~200 VU에서 역전 |
+| 데이터 복잡도 | 역전 없음 — 다섯 단계 모두 Protobuf 두 경로는 차이 없음, `http-json`만 낮다 | ~150 필드에서 역전 |
+
+큰 응답에서 `grpc-unary`가 느린 것은 직렬화 때문이 아니다. 같은 메시지를 HTTP/1.1로 보내는 `http-proto`는 `http-bytes`와 3~12.5% 차이다. gRPC 전송 구간 안의 무엇 때문인지는 확인하지 못했다(`docs/remeasure/RESULT.md` "확인하지 못한 것").
+
+### 예전 가이드 (2026-01 — 다시 재기 전)
+
+> 아래 두 표는 2026-01 Phase 1~7의 결과(조건당 1~3회, 경로마다 하는 일이 달랐다)로 만든 것이다. "100KB 이하 gRPC 30~67%", "200 VU 이상 gRPC", "150 필드 이상 HTTP"는 다시 잰 결과에서 재현되지 않았다. 계산과 기준의 불일치는 `docs/remeasure/ERRATA.md`에 있다.
+
+#### 프로토콜 선택 가이드 (2026-01)
 
 | 조건 | 추천 프로토콜 | 성능 차이 | 근거 |
 |------|--------------|----------|------|
@@ -41,7 +77,7 @@ HTTP vs gRPC 프로토콜 성능 비교 벤치마크 프로젝트
 | **극한 복잡도 (≥150 필드)** | HTTP/Binary | 12~18% 더 빠름 | Protobuf 빌더 오버헤드 |
 | **실시간 양방향** | gRPC/Stream | - | 기능적 요구 |
 
-### 핵심 역전 포인트
+#### 핵심 역전 포인트 (2026-01)
 
 | 기준 | 역전 포인트 | gRPC 우위 | HTTP 우위 |
 |------|------------|----------|----------|
@@ -52,6 +88,8 @@ HTTP vs gRPC 프로토콜 성능 비교 벤치마크 프로젝트
 ---
 
 ## 📋 Phase별 상세 결과
+
+> 2026-01 측정의 기록이다. 다시 잰 결과는 `docs/remeasure/RESULT.md`, 이 절의 불일치는 `docs/remeasure/ERRATA.md`에 있다. 원문은 `docs/phase/PHASE*_RESULT.md`다.
 
 ### Phase 1: 대용량 단일 페이로드 (1MB)
 
@@ -563,6 +601,8 @@ cd scripts
 ---
 
 ## 🎯 핵심 인사이트
+
+> 2026-01 측정에서 쓴 인사이트다. 1번과 3번은 다시 잰 결과에서 재현되지 않았다. 2번의 "대용량에서 Protobuf 오버헤드"는 방향은 맞지만, 다시 잰 결과에서 느린 곳은 직렬화가 아니라 gRPC 전송 쪽이었다(`docs/remeasure/RESULT.md` "예전 결론 가운데 재현되지 않은 것", "전송 방식과 직렬화를 나눠 본 결과").
 
 ### 1. "gRPC가 항상 빠르다"는 오해
 
