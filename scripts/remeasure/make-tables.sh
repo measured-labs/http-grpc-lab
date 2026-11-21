@@ -21,6 +21,7 @@ size-delay0ms|$R/delay0ms/size-default|-|크기 축 — 컨테이너, 지연 0ms
 size-delay1ms|$R/delay1ms/size-default|$R/delay0ms/size-default|크기 축 — 컨테이너, 지연 1ms(delay0ms와 견줌), 기본 설정, 동시 10
 size-delay10ms|$R/delay10ms/size-default|$R/delay0ms/size-default|크기 축 — 컨테이너, 지연 10ms(delay0ms와 견줌), 기본 설정, 동시 10
 size-delay0ms-vs-nodelay|$R/delay0ms/size-default|$R/nodelay/size-default|참고 — 컨테이너 지연 0ms를 호스트 직접 실행과 견줌(워밍업 1,000회 대 200회, JDK 21.0.13 대 21.0.5 — 지연의 효과로 읽지 않는다)
+record-complexity-v1-above-load|$R/nodelay/complexity-default-v1-above-load|-|기록 — 복잡도 축의 첫 측정(회차 1·3이 부하 기준 4.0을 넘은 채 시작). 결과로 쓰지 않는다
 record-concurrency-matched-v1-fixed-executor|$R/nodelay/concurrency-matched-v1-fixed-executor|-|기록 — 맞춘 설정의 잘못된 구성(v1, gRPC 서버 실행기를 고정 512 풀로). grpc-unary 값은 쓰지 않는다
 check-concurrency-matched-v2|$R/check-matched-v2/concurrency-matched|$R/check-default/concurrency-default|확인 실행 — 고친 matched를 바로 뒤에 이어서 잰 default와 견줌(동시 50·200, 3회 × 15초)
 check-concurrency-default|$R/check-default/concurrency-default|-|확인 실행 — default(동시 50·200, 3회 × 15초, check-matched-v2 바로 뒤에 이어서 잼)

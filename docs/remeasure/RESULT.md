@@ -139,7 +139,7 @@ Protobuf 두 경로는 모든 단계에서 1위가 바뀌어 차이가 없다. `
 아래 문장은 README의 2026-01 가이드(지금은 README의 "예전 가이드" 절)에 있던 것이다. 각 문장 뒤에 이번 측정에서 나온 것을 적는다.
 
 - "소용량 API (≤100KB) — gRPC/Unary — 30~67% 더 빠름": 호스트 실행에서 `grpc-unary`가 5/5로 앞선 것은 10KB 하나이고 폭은 `http-proto`보다 7.8%, `http-bytes`보다 11.4%다. 1KB와 50KB는 차이 없음, 100KB는 `grpc-unary`가 `http-bytes`보다 낮다.
-- "고동시성 (200+ VU) — gRPC/Unary — 9~12% 더 빠름": 두 설정 모두 처리량의 1위가 회차마다 바뀌었다. `matched`의 동시 500은 오히려 HTTP 쪽이 5/5다. p95는 동시 100~200에서 `grpc-unary`가 낮은 회차가 많다.
+- "고동시성 (200+ VU) — gRPC/Unary — 9~12% 더 빠름": 두 설정 모두 처리량의 1위가 회차마다 바뀌었다. `grpc-unary`가 1위인 회차가 없는 조건이 다섯 군데(두 설정의 동시 10과 500, `matched`의 동시 50)이고, `grpc-unary`가 `http-proto`를 5/5로 앞선 조건은 없다. p95는 동시 100~200에서 `grpc-unary`가 낮은 회차가 많다.
 - "저동시성 (< 100 VU) — HTTP/Binary — 3~13% 더 빠름": 동시 10·50 모두 차이 없음이다.
 - "복잡한 구조 (≤50 필드) — gRPC/Unary — 40~69% 더 빠름": `grpc-unary`와 `http-proto`는 차이 없음이고, `http-proto`는 `http-json`보다 medium에서 14.0%, complex에서 10.0% 높고(5/5), simple에서는 차이 없음이다.
 - "극한 복잡도 (≥150 필드) — HTTP/Binary — 12~18% 더 빠름": ultra와 extreme에서도 Protobuf 두 경로는 차이 없음이고 `http-json`이 가장 낮다.
