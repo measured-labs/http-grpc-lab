@@ -1,0 +1,32 @@
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 260444  8680.735393/s
+    checks_succeeded...: 100.00% 260444 out of 260444
+    checks_failed......: 0.00%   0 out of 260444
+
+    ✓ status 200
+    ✓ serializedSize > 0
+
+    CUSTOM
+    server_call_ms.................: avg=1.11ms min=378.54µs med=1.08ms max=5.37ms p(90)=1.4ms  p(95)=1.54ms p(99)=2.09ms
+
+    HTTP
+    http_req_duration..............: avg=1.99ms min=863.43µs med=1.94ms max=6.65ms p(90)=2.42ms p(95)=2.64ms p(99)=3.39ms
+      { expected_response:true }...: avg=1.99ms min=863.43µs med=1.94ms max=6.65ms p(90)=2.42ms p(95)=2.64ms p(99)=3.39ms
+    http_req_failed................: 0.00%  0 out of 130222
+    http_reqs......................: 130222 4340.367697/s
+
+    EXECUTION
+    iteration_duration.............: avg=2.27ms min=1.07ms   med=2.21ms max=7.61ms p(90)=2.75ms p(95)=3ms    p(99)=3.85ms
+    iterations.....................: 130222 4340.367697/s
+    vus............................: 10     min=10          max=10
+    vus_max........................: 10     min=10          max=10
+
+    NETWORK
+    data_received..................: 36 MB  1.2 MB/s
+    data_sent......................: 15 MB  482 kB/s
+
+
+

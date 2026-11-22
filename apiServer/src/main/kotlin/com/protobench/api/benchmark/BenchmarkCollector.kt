@@ -216,7 +216,8 @@ class BenchmarkCollector {
         val endGcTime = gcMXBeans.sumOf { it.collectionTime }
 
         val latencies = metrics.map { it.latencyNanos / 1_000_000.0 }.sorted()
-        val totalBytes = metrics.sumOf { it.responseBytes }
+        // 크기를 재지 않은 요청(-1)이 하나라도 있으면 합계도 값이 없음(-1)으로 둔다
+        val totalBytes = if (metrics.any { it.responseBytes < 0 }) -1L else metrics.sumOf { it.responseBytes }
 
         val latencyStats = if (latencies.isNotEmpty()) {
             LatencyStats(
@@ -262,7 +263,11 @@ class BenchmarkCollector {
             ),
             dataTransfer = DataTransferStats(
                 totalBytes = totalBytes,
-                avgResponseBytes = if (successCount.get() > 0) totalBytes.toDouble() / successCount.get() else 0.0
+                avgResponseBytes = when {
+                    totalBytes < 0 -> -1.0
+                    successCount.get() > 0 -> totalBytes.toDouble() / successCount.get()
+                    else -> 0.0
+                }
             )
         )
     }

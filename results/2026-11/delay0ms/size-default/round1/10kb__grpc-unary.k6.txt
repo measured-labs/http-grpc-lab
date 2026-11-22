@@ -1,0 +1,32 @@
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 259136  8636.906167/s
+    checks_succeeded...: 100.00% 259136 out of 259136
+    checks_failed......: 0.00%   0 out of 259136
+
+    ✓ status 200
+    ✓ payloadSize = 조건 크기
+
+    CUSTOM
+    server_call_ms.................: avg=1.05ms min=260.52µs med=1.03ms max=7.71ms  p(90)=1.44ms p(95)=1.57ms p(99)=1.9ms 
+
+    HTTP
+    http_req_duration..............: avg=2.02ms min=795.66µs med=1.98ms max=10.8ms  p(90)=2.52ms p(95)=2.71ms p(99)=3.2ms 
+      { expected_response:true }...: avg=2.02ms min=795.66µs med=1.98ms max=10.8ms  p(90)=2.52ms p(95)=2.71ms p(99)=3.2ms 
+    http_req_failed................: 0.00%  0 out of 129568
+    http_reqs......................: 129568 4318.453083/s
+
+    EXECUTION
+    iteration_duration.............: avg=2.28ms min=1ms      med=2.23ms max=11.64ms p(90)=2.82ms p(95)=3.04ms p(99)=3.66ms
+    iterations.....................: 129568 4318.453083/s
+    vus............................: 10     min=10          max=10
+    vus_max........................: 10     min=10          max=10
+
+    NETWORK
+    data_received..................: 31 MB  1.0 MB/s
+    data_sent......................: 12 MB  402 kB/s
+
+
+

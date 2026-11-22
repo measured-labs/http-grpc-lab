@@ -2,7 +2,8 @@ package com.protobench.data.service
 
 import jakarta.annotation.PostConstruct
 import org.springframework.stereotype.Service
-import java.util.concurrent.ThreadLocalRandom
+import java.util.Random
+import kotlin.random.asKotlinRandom
 
 /**
  * 페이로드 데이터 관리 서비스
@@ -27,6 +28,18 @@ class DataService {
             "1mb" to 1 * 1024 * 1024
         )
         const val CHUNK_SIZE = 64 * 1024
+
+        /** 시작 때 만드는 복잡도 축 데이터의 id 접미사 (데이터의 id는 "simple-fixed" 등으로 고정된다) */
+        const val COMPLEX_DATA_ID = "fixed"
+
+        /**
+         * 데이터를 만드는 난수의 시드. 고정해 두어 서버를 다시 띄워도 크기 축의 바이트와
+         * 복잡도 축의 데이터가 같다(측정 회차마다 서버를 새로 띄운다).
+         */
+        const val DATA_SEED = 20261121L
+
+        /** 복잡도 축 데이터의 시각 필드(createdAt 등)의 기준 시각 — 2026-11-21T00:00:00Z. 시드와 같은 이유로 고정한다 */
+        const val DATA_BASE_TIME_MS = 1_795_219_200_000L
 
         // Phase 5: 복잡도별 설정
         const val SIMPLE_TAGS_COUNT = 0
@@ -80,20 +93,45 @@ class DataService {
         const val EXTREME_ROLES_PER_PARTICIPANT = 3
     }
 
+    /** 시드를 고정한 난수 — init()이 한 스레드에서 같은 순서로 뽑으므로 프로세스마다 같은 데이터가 나온다 */
+    private val random = Random(DATA_SEED)
+    private val kotlinRandom = random.asKotlinRandom()
+
     private val payloads = mutableMapOf<String, ByteArray>()
     val serverId = "data-server-${System.currentTimeMillis() % 10000}"
+
+    /**
+     * 복잡도 축의 데이터(도메인 객체) — 서버 시작 때 복잡도마다 한 번 만들어 둔다.
+     *
+     * 세 경로(`http-json`, `http-proto`, `grpc-unary`)가 요청마다 이 같은 객체에서 응답을 만든다.
+     * 요청마다 달라지는 것은 응답의 requestId와 timestamp뿐이다. 직렬화(JSON, Protobuf)는
+     * 측정 대상이라 요청마다 한다(미리 직렬화해 두지 않는다).
+     */
+    private val complexData = mutableMapOf<String, Any>()
 
     @PostConstruct
     fun init() {
         PAYLOAD_SIZES.forEach { (name, size) ->
             val payload = ByteArray(size)
-            ThreadLocalRandom.current().nextBytes(payload)
+            random.nextBytes(payload)
             payloads[name] = payload
             println("✅ Initialized payload: $name (${size} bytes)")
         }
-        println("✅ Phase 5: Complex data generators ready")
-        println("✅ Phase 6: Ultra/Extreme data generators ready")
+        complexData["simple"] = generateSimpleData(COMPLEX_DATA_ID)
+        complexData["medium"] = generateMediumData(COMPLEX_DATA_ID)
+        complexData["complex"] = generateComplexData(COMPLEX_DATA_ID)
+        complexData["ultra"] = generateUltraData(COMPLEX_DATA_ID)
+        complexData["extreme"] = generateExtremeData(COMPLEX_DATA_ID)
+        println("✅ Complex data built once per complexity: ${complexData.keys}")
     }
+
+    /**
+     * 시작 때 만들어 둔 복잡도 축 데이터
+     *
+     * @param complexity simple, medium, complex, ultra, extreme (대소문자 무시)
+     * @return 해당 DTO(SimpleDataDto 등), 복잡도 값이 잘못되면 null
+     */
+    fun getComplexData(complexity: String): Any? = complexData[complexity.lowercase()]
 
     /**
      * 지정된 크기의 페이로드 반환
@@ -126,6 +164,26 @@ class DataService {
         return PAYLOAD_SIZES[size.lowercase()] ?: PAYLOAD_SIZES["1mb"]!!
     }
 
+    /**
+     * 크기 축의 Protobuf 응답 메시지 생성
+     *
+     * gRPC 단건(grpc-unary)과 HTTP + Protobuf(http-proto) 경로가 같은 메시지를 보내도록
+     * 두 경로 모두 이 함수로 만든다.
+     *
+     * @param requestId 요청 ID
+     * @param size 페이로드 크기 키
+     * @return DataResponse (전체 페이로드 포함)
+     */
+    fun buildDataResponseProto(requestId: String, size: String): com.protobench.proto.DataResponse {
+        val payload = getPayload(size)
+        return com.protobench.proto.DataResponse.newBuilder()
+            .setRequestId(requestId)
+            .setPayload(com.google.protobuf.ByteString.copyFrom(payload))
+            .setTimestamp(System.currentTimeMillis())
+            .setPayloadSize(payload.size)
+            .build()
+    }
+
     // ============================================
     // Phase 5: 복잡한 데이터 구조 생성
     // ============================================
@@ -140,9 +198,9 @@ class DataService {
         return SimpleDataDto(
             id = "simple-$requestId",
             name = "User-${randomString(8)}",
-            age = ThreadLocalRandom.current().nextInt(18, 80),
-            score = ThreadLocalRandom.current().nextDouble(0.0, 100.0),
-            isActive = ThreadLocalRandom.current().nextBoolean()
+            age = random.nextInt(18, 80),
+            score = random.nextDouble(0.0, 100.0),
+            isActive = random.nextBoolean()
         )
     }
 
@@ -156,14 +214,14 @@ class DataService {
         return MediumDataDto(
             id = "medium-$requestId",
             name = "User-${randomString(8)}",
-            age = ThreadLocalRandom.current().nextInt(18, 80),
-            score = ThreadLocalRandom.current().nextDouble(0.0, 100.0),
-            isActive = ThreadLocalRandom.current().nextBoolean(),
+            age = random.nextInt(18, 80),
+            score = random.nextDouble(0.0, 100.0),
+            isActive = random.nextBoolean(),
             email = "${randomString(10)}@example.com",
             phone = "+82-10-${randomDigits(4)}-${randomDigits(4)}",
-            createdAt = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(86400000),
-            updatedAt = System.currentTimeMillis(),
-            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(),
+            createdAt = DATA_BASE_TIME_MS - random.nextLong(86400000),
+            updatedAt = DATA_BASE_TIME_MS,
+            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(kotlinRandom),
             tags = (1..MEDIUM_TAGS_COUNT).map { "tag-${randomString(5)}" },
             address = generateAddress(),
             metadata = (1..MEDIUM_METADATA_COUNT).associate { "key-$it" to "value-${randomString(10)}" }
@@ -180,20 +238,20 @@ class DataService {
         return ComplexDataDto(
             id = "complex-$requestId",
             name = "User-${randomString(8)}",
-            age = ThreadLocalRandom.current().nextInt(18, 80),
-            score = ThreadLocalRandom.current().nextDouble(0.0, 100.0),
-            isActive = ThreadLocalRandom.current().nextBoolean(),
+            age = random.nextInt(18, 80),
+            score = random.nextDouble(0.0, 100.0),
+            isActive = random.nextBoolean(),
             email = "${randomString(10)}@example.com",
             phone = "+82-10-${randomDigits(4)}-${randomDigits(4)}",
-            createdAt = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(86400000),
-            updatedAt = System.currentTimeMillis(),
-            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(),
+            createdAt = DATA_BASE_TIME_MS - random.nextLong(86400000),
+            updatedAt = DATA_BASE_TIME_MS,
+            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(kotlinRandom),
             tags = (1..COMPLEX_TAGS_COUNT).map { "tag-${randomString(5)}" },
             address = generateAddress(),
             billingAddress = generateAddress(),
             orders = (1..COMPLEX_ORDERS_COUNT).map { generateOrder() },
             metadata = (1..COMPLEX_METADATA_COUNT).associate { "key-$it" to "value-${randomString(10)}" },
-            scores = (1..COMPLEX_SCORES_COUNT).associate { "score-$it" to ThreadLocalRandom.current().nextInt(0, 100) },
+            scores = (1..COMPLEX_SCORES_COUNT).associate { "score-$it" to random.nextInt(0, 100) },
             permissions = (1..COMPLEX_PERMISSIONS_COUNT).map { "permission-${randomString(6)}" },
             addresses = (1..COMPLEX_ADDRESSES_COUNT).map { generateAddress() },
             description = "Description: ${randomString(100)}",
@@ -229,25 +287,25 @@ class DataService {
             // 기본 필드 15개
             id = "ultra-$requestId",
             name = "User-${randomString(8)}",
-            age = ThreadLocalRandom.current().nextInt(18, 80),
-            score = ThreadLocalRandom.current().nextDouble(0.0, 100.0),
-            isActive = ThreadLocalRandom.current().nextBoolean(),
+            age = random.nextInt(18, 80),
+            score = random.nextDouble(0.0, 100.0),
+            isActive = random.nextBoolean(),
             email = "${randomString(10)}@example.com",
             phone = "+82-10-${randomDigits(4)}-${randomDigits(4)}",
-            createdAt = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(86400000),
-            updatedAt = System.currentTimeMillis(),
-            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(),
-            priority = ThreadLocalRandom.current().nextInt(1, 10),
-            level = ThreadLocalRandom.current().nextInt(1, 100),
-            rating = ThreadLocalRandom.current().nextDouble(0.0, 5.0),
-            verified = ThreadLocalRandom.current().nextBoolean(),
-            premium = ThreadLocalRandom.current().nextBoolean(),
+            createdAt = DATA_BASE_TIME_MS - random.nextLong(86400000),
+            updatedAt = DATA_BASE_TIME_MS,
+            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(kotlinRandom),
+            priority = random.nextInt(1, 10),
+            level = random.nextInt(1, 100),
+            rating = random.nextDouble(0.0, 5.0),
+            verified = random.nextBoolean(),
+            premium = random.nextBoolean(),
 
             // 배열/맵
             tags = (1..ULTRA_TAGS_COUNT).map { "tag-${randomString(5)}" },
             permissions = (1..ULTRA_PERMISSIONS_COUNT).map { "permission-${randomString(6)}" },
             metadata = (1..ULTRA_METADATA_COUNT).associate { "key-$it" to "value-${randomString(10)}" },
-            scores = (1..ULTRA_SCORES_COUNT).associate { "score-$it" to ThreadLocalRandom.current().nextInt(0, 100) },
+            scores = (1..ULTRA_SCORES_COUNT).associate { "score-$it" to random.nextInt(0, 100) },
 
             // 2단계 중첩
             addresses = (1..ULTRA_ADDRESSES_COUNT).map { generateAddressWithContacts() },
@@ -286,30 +344,30 @@ class DataService {
             // 기본 필드 20개
             id = "extreme-$requestId",
             name = "User-${randomString(8)}",
-            age = ThreadLocalRandom.current().nextInt(18, 80),
-            score = ThreadLocalRandom.current().nextDouble(0.0, 100.0),
-            isActive = ThreadLocalRandom.current().nextBoolean(),
+            age = random.nextInt(18, 80),
+            score = random.nextDouble(0.0, 100.0),
+            isActive = random.nextBoolean(),
             email = "${randomString(10)}@example.com",
             phone = "+82-10-${randomDigits(4)}-${randomDigits(4)}",
-            createdAt = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(86400000),
-            updatedAt = System.currentTimeMillis(),
-            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(),
-            priority = ThreadLocalRandom.current().nextInt(1, 10),
-            level = ThreadLocalRandom.current().nextInt(1, 100),
-            rating = ThreadLocalRandom.current().nextDouble(0.0, 5.0),
-            verified = ThreadLocalRandom.current().nextBoolean(),
-            premium = ThreadLocalRandom.current().nextBoolean(),
-            tier = listOf("BRONZE", "SILVER", "GOLD", "PLATINUM").random(),
-            region = listOf("APAC", "EMEA", "AMER").random(),
-            language = listOf("ko", "en", "ja", "zh").random(),
-            currency = listOf("KRW", "USD", "JPY", "EUR").random(),
-            timezone = listOf("Asia/Seoul", "America/New_York", "Europe/London").random(),
+            createdAt = DATA_BASE_TIME_MS - random.nextLong(86400000),
+            updatedAt = DATA_BASE_TIME_MS,
+            status = listOf("ACTIVE", "PENDING", "INACTIVE").random(kotlinRandom),
+            priority = random.nextInt(1, 10),
+            level = random.nextInt(1, 100),
+            rating = random.nextDouble(0.0, 5.0),
+            verified = random.nextBoolean(),
+            premium = random.nextBoolean(),
+            tier = listOf("BRONZE", "SILVER", "GOLD", "PLATINUM").random(kotlinRandom),
+            region = listOf("APAC", "EMEA", "AMER").random(kotlinRandom),
+            language = listOf("ko", "en", "ja", "zh").random(kotlinRandom),
+            currency = listOf("KRW", "USD", "JPY", "EUR").random(kotlinRandom),
+            timezone = listOf("Asia/Seoul", "America/New_York", "Europe/London").random(kotlinRandom),
 
             // 대량 배열/맵
             tags = (1..EXTREME_TAGS_COUNT).map { "tag-${randomString(5)}" },
             permissions = (1..EXTREME_PERMISSIONS_COUNT).map { "permission-${randomString(6)}" },
             metadata = (1..EXTREME_METADATA_COUNT).associate { "key-$it" to "value-${randomString(10)}" },
-            scores = (1..EXTREME_SCORES_COUNT).associate { "score-$it" to ThreadLocalRandom.current().nextInt(0, 100) },
+            scores = (1..EXTREME_SCORES_COUNT).associate { "score-$it" to random.nextInt(0, 100) },
 
             // 2단계 중첩
             addresses = (1..EXTREME_ADDRESSES_COUNT).map { generateAddressWithContacts() },
@@ -344,7 +402,7 @@ class DataService {
             name = "Contact-${randomString(6)}",
             phone = "+82-10-${randomDigits(4)}-${randomDigits(4)}",
             email = "${randomString(8)}@contact.com",
-            role = roles.random()
+            role = roles.random(kotlinRandom)
         )
     }
 
@@ -357,10 +415,10 @@ class DataService {
         val cities = listOf("Seoul", "Busan", "Incheon", "Daegu", "Daejeon", "Gwangju", "Ulsan")
         val countries = listOf("Korea", "Japan", "USA", "China", "Germany")
         return AddressWithContactsDto(
-            city = cities.random(),
+            city = cities.random(kotlinRandom),
             street = "${randomDigits(3)} ${randomString(10)} Street",
             zipcode = randomDigits(5),
-            country = countries.random(),
+            country = countries.random(kotlinRandom),
             contacts = (1..ULTRA_CONTACTS_PER_ADDRESS).map { generateContact() }
         )
     }
@@ -375,7 +433,7 @@ class DataService {
         return AttributeDto(
             key = "attr-${randomString(4)}",
             value = "val-${randomString(8)}",
-            type = types.random()
+            type = types.random(kotlinRandom)
         )
     }
 
@@ -385,8 +443,8 @@ class DataService {
      * @return ItemWithAttributesDto
      */
     private fun generateItemWithAttributes(): ItemWithAttributesDto {
-        val quantity = ThreadLocalRandom.current().nextInt(1, 10)
-        val price = ThreadLocalRandom.current().nextDouble(10.0, 500.0)
+        val quantity = random.nextInt(1, 10)
+        val price = random.nextDouble(10.0, 500.0)
         return ItemWithAttributesDto(
             productId = "prod-${randomString(8)}",
             name = "Product-${randomString(6)}",
@@ -407,8 +465,8 @@ class DataService {
         return OrderWithAttributesDto(
             orderId = "order-${randomString(12)}",
             amount = items.sumOf { it.price * it.quantity },
-            timestamp = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(2592000000),
-            status = statuses.random(),
+            timestamp = DATA_BASE_TIME_MS - random.nextLong(2592000000),
+            status = statuses.random(kotlinRandom),
             items = items
         )
     }
@@ -448,7 +506,7 @@ class DataService {
     private fun generateChange(): ChangeDto {
         val fields = listOf("name", "email", "status", "score", "level", "rating")
         return ChangeDto(
-            field = fields.random(),
+            field = fields.random(kotlinRandom),
             oldValue = "old-${randomString(8)}",
             newValue = "new-${randomString(8)}"
         )
@@ -463,8 +521,8 @@ class DataService {
         val actions = listOf("CREATE", "UPDATE", "DELETE", "RESTORE")
         return HistoryEntryDto(
             id = "hist-${randomString(8)}",
-            timestamp = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(86400000L * 30),
-            action = actions.random(),
+            timestamp = DATA_BASE_TIME_MS - random.nextLong(86400000L * 30),
+            action = actions.random(kotlinRandom),
             changes = (1..ULTRA_CHANGES_PER_HISTORY).map { generateChange() }
         )
     }
@@ -482,7 +540,7 @@ class DataService {
         return AttributeValueDto(
             value = "val-${randomString(6)}",
             label = "Label-${randomString(4)}",
-            isDefault = ThreadLocalRandom.current().nextBoolean()
+            isDefault = random.nextBoolean()
         )
     }
 
@@ -495,7 +553,7 @@ class DataService {
         val types = listOf("STRING", "NUMBER", "BOOLEAN", "ENUM", "DATE")
         return AttributeWithValuesDto(
             key = "attr-${randomString(4)}",
-            type = types.random(),
+            type = types.random(kotlinRandom),
             values = (1..EXTREME_VALUES_PER_ATTRIBUTE).map { generateAttributeValue() }
         )
     }
@@ -506,8 +564,8 @@ class DataService {
      * @return ExtremeItemDto
      */
     private fun generateExtremeItem(): ExtremeItemDto {
-        val quantity = ThreadLocalRandom.current().nextInt(1, 10)
-        val price = ThreadLocalRandom.current().nextDouble(10.0, 500.0)
+        val quantity = random.nextInt(1, 10)
+        val price = random.nextDouble(10.0, 500.0)
         return ExtremeItemDto(
             productId = "prod-${randomString(8)}",
             name = "Product-${randomString(6)}",
@@ -528,9 +586,9 @@ class DataService {
         return ExtremeOrderDto(
             orderId = "order-${randomString(12)}",
             amount = items.sumOf { it.price * it.quantity },
-            timestamp = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(2592000000),
-            status = statuses.random(),
-            priority = ThreadLocalRandom.current().nextInt(1, 5),
+            timestamp = DATA_BASE_TIME_MS - random.nextLong(2592000000),
+            status = statuses.random(kotlinRandom),
+            priority = random.nextInt(1, 5),
             items = items
         )
     }
@@ -545,7 +603,7 @@ class DataService {
         return MemberDto(
             id = "member-${randomString(6)}",
             name = "Member-${randomString(8)}",
-            role = roles.random(),
+            role = roles.random(kotlinRandom),
             email = "${randomString(8)}@company.com"
         )
     }
@@ -572,7 +630,7 @@ class DataService {
         return DepartmentDto(
             id = "dept-${randomString(6)}",
             name = "Department-${randomString(8)}",
-            budget = ThreadLocalRandom.current().nextDouble(100000.0, 10000000.0),
+            budget = random.nextDouble(100000.0, 10000000.0),
             teams = (1..EXTREME_TEAMS_PER_DEPT).map { generateTeam() }
         )
     }
@@ -587,7 +645,7 @@ class DataService {
         return OrganizationDto(
             id = "org-${randomString(6)}",
             name = "Organization-${randomString(8)}",
-            type = types.random(),
+            type = types.random(kotlinRandom),
             departments = (1..EXTREME_DEPTS_PER_ORG).map { generateDepartment() }
         )
     }
@@ -601,7 +659,7 @@ class DataService {
         val roleNames = listOf("SPEAKER", "ATTENDEE", "ORGANIZER", "MODERATOR", "VIP")
         return RoleDto(
             id = "role-${randomString(6)}",
-            name = roleNames.random(),
+            name = roleNames.random(kotlinRandom),
             permissions = (1..3).map { "perm-${randomString(4)}" }
         )
     }
@@ -630,8 +688,8 @@ class DataService {
         return EventDto(
             id = "event-${randomString(6)}",
             name = "Event-${randomString(8)}",
-            timestamp = System.currentTimeMillis() + ThreadLocalRandom.current().nextLong(86400000L * 365),
-            location = locations.random(),
+            timestamp = DATA_BASE_TIME_MS + random.nextLong(86400000L * 365),
+            location = locations.random(kotlinRandom),
             participants = (1..EXTREME_PARTICIPANTS_PER_EVENT).map { generateParticipant() }
         )
     }
@@ -649,10 +707,10 @@ class DataService {
         val cities = listOf("Seoul", "Busan", "Incheon", "Daegu", "Daejeon", "Gwangju", "Ulsan")
         val countries = listOf("Korea", "Japan", "USA", "China", "Germany")
         return AddressDto(
-            city = cities.random(),
+            city = cities.random(kotlinRandom),
             street = "${randomDigits(3)} ${randomString(10)} Street",
             zipcode = randomDigits(5),
-            country = countries.random()
+            country = countries.random(kotlinRandom)
         )
     }
 
@@ -666,7 +724,7 @@ class DataService {
         return OrderDto(
             orderId = "order-${randomString(12)}",
             amount = items.sumOf { it.price * it.quantity },
-            timestamp = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(2592000000), // 30일 내
+            timestamp = DATA_BASE_TIME_MS - random.nextLong(2592000000), // 30일 내
             items = items
         )
     }
@@ -677,8 +735,8 @@ class DataService {
      * @return ItemDto
      */
     private fun generateItem(): ItemDto {
-        val quantity = ThreadLocalRandom.current().nextInt(1, 10)
-        val price = ThreadLocalRandom.current().nextDouble(10.0, 500.0)
+        val quantity = random.nextInt(1, 10)
+        val price = random.nextDouble(10.0, 500.0)
         return ItemDto(
             productId = "prod-${randomString(8)}",
             name = "Product-${randomString(6)}",
@@ -695,7 +753,7 @@ class DataService {
      */
     private fun randomString(length: Int): String {
         val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        return (1..length).map { chars.random() }.joinToString("")
+        return (1..length).map { chars.random(kotlinRandom) }.joinToString("")
     }
 
     /**
@@ -705,7 +763,7 @@ class DataService {
      * @return 랜덤 숫자 문자열
      */
     private fun randomDigits(length: Int): String {
-        return (1..length).map { ThreadLocalRandom.current().nextInt(0, 10) }.joinToString("")
+        return (1..length).map { random.nextInt(0, 10) }.joinToString("")
     }
 }
 

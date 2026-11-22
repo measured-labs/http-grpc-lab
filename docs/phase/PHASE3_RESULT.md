@@ -1,3 +1,5 @@
+> 2026-11-21에 다시 쟀다. 새 결과는 `docs/remeasure/RESULT.md`, 이 문서와 README의 불일치는 `docs/remeasure/ERRATA.md`에 있다. 아래 본문은 2026-01 측정 그대로다.
+
 # Phase 3: 고동시성 멀티플렉싱 테스트 결과
 
 ## 개요

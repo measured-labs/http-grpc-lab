@@ -48,6 +48,19 @@ class ApiController(
     }
 
     /**
+     * HTTP/1.1 + Protobuf 방식으로 데이터 요청 (http-proto 경로)
+     *
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return ApiResponse
+     */
+    @GetMapping("/data/http/proto")
+    fun getDataHttpProto(
+        @RequestParam(defaultValue = "1mb") size: String
+    ): ResponseEntity<ApiResponse> = runBlocking {
+        ResponseEntity.ok(apiDataService.getDataHttpProto(size))
+    }
+
+    /**
      * gRPC Unary 방식으로 데이터 요청
      *
      * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)

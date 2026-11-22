@@ -29,6 +29,7 @@ class GrpcServerConfig(
      */
     @PostConstruct
     fun start() {
+        // 서버 실행기는 두 설정 모두 grpc-java 기본값이다(matched는 서비스 코루틴의 디스패처만 바꾼다 — GrpcHandlerDispatcher)
         server = ServerBuilder
             .forPort(grpcPort)
             .addService(grpcDataService)
@@ -36,13 +37,16 @@ class GrpcServerConfig(
             .build()
             .start()
 
-        println("✅ gRPC Server started on port $grpcPort")
+        println("✅ gRPC Server started on port ${server.port}")
 
         Runtime.getRuntime().addShutdownHook(Thread {
             println("Shutting down gRPC server...")
             stop()
         })
     }
+
+    /** 실제로 열린 포트 (설정이 0이면 OS가 고른 포트) */
+    fun port(): Int = server.port
 
     /**
      * gRPC 서버 종료

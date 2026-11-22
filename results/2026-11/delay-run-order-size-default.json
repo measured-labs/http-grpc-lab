@@ -1,0 +1,168 @@
+{
+  "status": "complete",
+  "axis": "size",
+  "config": "default",
+  "rounds": 5,
+  "labelPrefix": "",
+  "delaysMs": [
+    0,
+    1,
+    10
+  ],
+  "rule": "회차 r의 지연 순서 = (0, 1, 10)을 r−1만큼 돌린 것. 실행마다 run.sh --only-round r --delay X",
+  "passedArgs": "--max-wait 3600",
+  "commitAtStart": "fcd275545752a0ee5a54f2072660b950ada81adc",
+  "startedAt": "2026-11-21T22:58:18+09:00",
+  "runs": [
+    {
+      "round": 1,
+      "orderInRound": 1,
+      "delayMs": 0,
+      "label": "delay0ms",
+      "startedAt": "2026-11-21T22:58:18+09:00",
+      "endedAt": "2026-11-21T23:16:02+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay0ms/size-default/round1"
+    },
+    {
+      "round": 1,
+      "orderInRound": 2,
+      "delayMs": 1,
+      "label": "delay1ms",
+      "startedAt": "2026-11-21T23:16:02+09:00",
+      "endedAt": "2026-11-21T23:33:42+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay1ms/size-default/round1"
+    },
+    {
+      "round": 1,
+      "orderInRound": 3,
+      "delayMs": 10,
+      "label": "delay10ms",
+      "startedAt": "2026-11-21T23:33:42+09:00",
+      "endedAt": "2026-11-21T23:52:14+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay10ms/size-default/round1"
+    },
+    {
+      "round": 2,
+      "orderInRound": 1,
+      "delayMs": 1,
+      "label": "delay1ms",
+      "startedAt": "2026-11-21T23:52:15+09:00",
+      "endedAt": "2026-11-22T00:09:06+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay1ms/size-default/round2"
+    },
+    {
+      "round": 2,
+      "orderInRound": 2,
+      "delayMs": 10,
+      "label": "delay10ms",
+      "startedAt": "2026-11-22T00:09:06+09:00",
+      "endedAt": "2026-11-22T00:27:29+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay10ms/size-default/round2"
+    },
+    {
+      "round": 2,
+      "orderInRound": 3,
+      "delayMs": 0,
+      "label": "delay0ms",
+      "startedAt": "2026-11-22T00:27:29+09:00",
+      "endedAt": "2026-11-22T00:44:58+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay0ms/size-default/round2"
+    },
+    {
+      "round": 3,
+      "orderInRound": 1,
+      "delayMs": 10,
+      "label": "delay10ms",
+      "startedAt": "2026-11-22T00:44:58+09:00",
+      "endedAt": "2026-11-22T01:03:22+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay10ms/size-default/round3"
+    },
+    {
+      "round": 3,
+      "orderInRound": 2,
+      "delayMs": 0,
+      "label": "delay0ms",
+      "startedAt": "2026-11-22T01:03:22+09:00",
+      "endedAt": "2026-11-22T01:20:21+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay0ms/size-default/round3"
+    },
+    {
+      "round": 3,
+      "orderInRound": 3,
+      "delayMs": 1,
+      "label": "delay1ms",
+      "startedAt": "2026-11-22T01:20:21+09:00",
+      "endedAt": "2026-11-22T01:38:31+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay1ms/size-default/round3"
+    },
+    {
+      "round": 4,
+      "orderInRound": 1,
+      "delayMs": 0,
+      "label": "delay0ms",
+      "startedAt": "2026-11-22T01:38:31+09:00",
+      "endedAt": "2026-11-22T01:56:29+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay0ms/size-default/round4"
+    },
+    {
+      "round": 4,
+      "orderInRound": 2,
+      "delayMs": 1,
+      "label": "delay1ms",
+      "startedAt": "2026-11-22T01:56:30+09:00",
+      "endedAt": "2026-11-22T02:14:29+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay1ms/size-default/round4"
+    },
+    {
+      "round": 4,
+      "orderInRound": 3,
+      "delayMs": 10,
+      "label": "delay10ms",
+      "startedAt": "2026-11-22T02:14:29+09:00",
+      "endedAt": "2026-11-22T02:32:42+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay10ms/size-default/round4"
+    },
+    {
+      "round": 5,
+      "orderInRound": 1,
+      "delayMs": 1,
+      "label": "delay1ms",
+      "startedAt": "2026-11-22T02:32:42+09:00",
+      "endedAt": "2026-11-22T02:50:30+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay1ms/size-default/round5"
+    },
+    {
+      "round": 5,
+      "orderInRound": 2,
+      "delayMs": 10,
+      "label": "delay10ms",
+      "startedAt": "2026-11-22T02:50:30+09:00",
+      "endedAt": "2026-11-22T03:09:49+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay10ms/size-default/round5"
+    },
+    {
+      "round": 5,
+      "orderInRound": 3,
+      "delayMs": 0,
+      "label": "delay0ms",
+      "startedAt": "2026-11-22T03:09:49+09:00",
+      "endedAt": "2026-11-22T03:27:30+09:00",
+      "exitCode": 0,
+      "roundDir": "results/2026-11/delay0ms/size-default/round5"
+    }
+  ]
+}
